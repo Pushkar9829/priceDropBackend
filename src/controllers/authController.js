@@ -22,4 +22,14 @@ const me = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, data);
 });
 
-module.exports = { register, login, logout, me };
+const updateMe = asyncHandler(async (req, res) => {
+  const data = await authService.updateProfile(req.user._id, req.body);
+  return ApiResponse.success(res, data, 'Profile updated');
+});
+
+const changePassword = asyncHandler(async (req, res) => {
+  const data = await authService.changePassword(req.user._id, req.body);
+  return ApiResponse.success(res, data, 'Password changed');
+});
+
+module.exports = { register, login, logout, me, updateMe, changePassword };

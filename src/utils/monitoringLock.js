@@ -1,27 +1,10 @@
 /**
- * In-process locks for price monitoring.
- * Prevents overlapping cron + admin refresh on the same store products.
+ * In-process per-listing lock: serializes concurrent checks of the same listing on this
+ * instance (e.g. admin "refresh" while the scheduler is mid-run). Cross-instance exclusion
+ * for whole runs is handled by utils/distributedLock.
  */
-
-let batchRunning = false;
-
 const perProductLocks = new Map();
 
-const tryAcquireBatchLock = () => {
-  if (batchRunning) return false;
-  batchRunning = true;
-  return true;
-};
-
-const releaseBatchLock = () => {
-  batchRunning = false;
-};
-
-const isBatchRunning = () => batchRunning;
-
-/**
- * Serialize checks for the same storeProductId across concurrent callers.
- */
 const withStoreProductLock = async (storeProductId, fn) => {
   const key = String(storeProductId);
 
@@ -47,9 +30,4 @@ const withStoreProductLock = async (storeProductId, fn) => {
   }
 };
 
-module.exports = {
-  tryAcquireBatchLock,
-  releaseBatchLock,
-  isBatchRunning,
-  withStoreProductLock,
-};
+module.exports = { withStoreProductLock };

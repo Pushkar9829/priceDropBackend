@@ -24,6 +24,7 @@ const { upsertBrandCatalog } = require('../src/utils/seedBrands');
 const logger = require('../src/utils/logger');
 
 const run = async () => {
+  require('../src/utils/scriptGuard').assertSafeTarget('clearExceptAdmin');
   await connectDB();
 
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@pricecompare.local';

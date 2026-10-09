@@ -56,6 +56,16 @@ const priceAlertSchema = new mongoose.Schema(
 
 priceAlertSchema.index({ productId: 1, status: 1 });
 priceAlertSchema.index({ storeProductId: 1, status: 1 });
+priceAlertSchema.index({ userId: 1, status: 1, createdAt: -1 });
+// One live alert per user + product + scope (double submits can't create twins)
+priceAlertSchema.index(
+  { userId: 1, productId: 1, storeProductId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: { $in: ['ACTIVE', 'TRIGGERED', 'PAUSED'] } },
+    name: 'one_live_alert_per_scope',
+  }
+);
 
 const PriceAlert = mongoose.model('PriceAlert', priceAlertSchema);
 

@@ -9,8 +9,10 @@ const {
   PriceAlert,
 } = require('../models');
 const { createSlug } = require('../utils/helpers');
+const { containsRegex } = require('../utils/regex');
 const AppError = require('../utils/AppError');
 const priceMonitoringService = require('./priceMonitoringService');
+const { deactivateDealsFor } = require('./dealService');
 const productService = require('./productService');
 const { isLiveFlipkartUrl } = require('../integrations/stores/flipkart/flipkart.scraper');
 const { isLiveAmazonUrl } = require('../integrations/stores/amazon/amazon.scraper');
@@ -18,6 +20,11 @@ const { isLiveCromaUrl } = require('../integrations/stores/croma/croma.scraper')
 const { closeBrowser } = require('../integrations/stores/base/browserClient');
 const config = require('../config');
 const logger = require('../utils/logger');
+const {
+  refreshProductSummaries,
+  refreshForStore,
+  invalidateStores,
+} = require('./productSummaryService');
 
 const detectLiveStoreSlug = (url = '') => {
   if (isLiveFlipkartUrl(url)) return 'flipkart';
@@ -36,8 +43,8 @@ const listUsers = async ({ page = 1, limit = 20, search } = {}) => {
   const filter = {};
   if (search) {
     filter.$or = [
-      { name: new RegExp(search, 'i') },
-      { email: new RegExp(search, 'i') },
+      { name: containsRegex(search) },
+      { email: containsRegex(search) },
     ];
   }
   const { page: p, limit: l, skip } = toPageLimit(page, limit);
@@ -48,7 +55,34 @@ const listUsers = async ({ page = 1, limit = 20, search } = {}) => {
   return { items, total, page: p, limit: l, pages: Math.ceil(total / l) || 1 };
 };
 
-const listStores = async () => Store.find().sort({ name: 1 });
+/**
+ * Admin can (de)activate users or change roles — never on their own account,
+ * so an admin can't lock themselves out.
+ */
+const updateUser = async (actorId, id, { isActive, role } = {}) => {
+  if (String(actorId) === String(id)) {
+    throw new AppError('You cannot change your own account here', 400, 'SELF_UPDATE');
+  }
+  const patch = {};
+  if (isActive !== undefined) patch.isActive = isActive;
+  if (role !== undefined) patch.role = role;
+  if (!Object.keys(patch).length) throw new AppError('No valid fields to update', 400, 'EMPTY_UPDATE');
+  const user = await User.findByIdAndUpdate(id, patch, { new: true, runValidators: true }).select('-password');
+  if (!user) throw new AppError('User not found', 404, 'USER_NOT_FOUND');
+  return user;
+};
+
+const listStores = async () => {
+  const [stores, counts] = await Promise.all([
+    Store.find().sort({ name: 1 }).lean(),
+    StoreProduct.aggregate([
+      { $match: { isActive: true } },
+      { $group: { _id: '$storeId', listings: { $sum: 1 } } },
+    ]),
+  ]);
+  const byStore = new Map(counts.map((c) => [String(c._id), c.listings]));
+  return stores.map((s) => ({ ...s, listings: byStore.get(String(s._id)) || 0 }));
+};
 
 const createStore = async (data) => {
   const slug = data.slug || createSlug(data.name);
@@ -56,6 +90,7 @@ const createStore = async (data) => {
   if (existing) {
     throw new AppError('Store already exists', 409, 'STORE_EXISTS');
   }
+  invalidateStores();
   return Store.create({
     name: data.name,
     slug,
@@ -67,54 +102,65 @@ const createStore = async (data) => {
   });
 };
 
-const updateStore = async (id, updates) => {
-  const store = await Store.findByIdAndUpdate(id, updates, { new: true, runValidators: true });
+const STORE_FIELDS = ['name', 'domain', 'logo', 'isActive', 'integrationType', 'config'];
+
+const updateStore = async (id, updates = {}) => {
+  const patch = Object.fromEntries(
+    STORE_FIELDS.filter((k) => updates[k] !== undefined).map((k) => [k, updates[k]])
+  );
+  if (!Object.keys(patch).length) throw new AppError('No valid fields to update', 400, 'EMPTY_UPDATE');
+  const before = await Store.findById(id).select('isActive').lean();
+  const store = await Store.findByIdAndUpdate(id, patch, { new: true, runValidators: true });
   if (!store) throw new AppError('Store not found', 404, 'STORE_NOT_FOUND');
+  if (patch.isActive === false) await deactivateDealsFor({ storeId: store._id });
+  if (patch.isActive !== undefined && before?.isActive !== store.isActive) {
+    // Its listings enter/leave every comparison — rebuild affected product summaries
+    refreshForStore(store._id).catch((err) => logger.error('Store summary refresh failed', { error: err.message }));
+  }
   return store;
 };
 
-const listProducts = async ({ page = 1, limit = 20, search, category } = {}) => {
+const PRODUCT_FIELDS = ['title', 'brand', 'category', 'subCategory', 'description', 'isActive'];
+
+const updateProduct = async (id, updates = {}) => {
+  const patch = {};
+  for (const key of PRODUCT_FIELDS) {
+    if (updates[key] === undefined) continue;
+    patch[key] = key === 'isActive' ? updates[key] === true || updates[key] === 'true' : String(updates[key]).trim();
+  }
+  if (patch.title === '') throw new AppError('Title cannot be empty', 400, 'VALIDATION_ERROR');
+  if (Array.isArray(updates.images)) {
+    patch.images = updates.images.filter((u) => typeof u === 'string' && /^https?:\/\//.test(u)).slice(0, 10);
+  }
+  if (!Object.keys(patch).length) throw new AppError('No valid fields to update', 400, 'EMPTY_UPDATE');
+  if (patch.title) patch.normalizedTitle = require('../utils/helpers').normalizeTitle(patch.title);
+  const product = await Product.findByIdAndUpdate(id, patch, { new: true, runValidators: true });
+  if (!product) throw new AppError('Product not found', 404, 'PRODUCT_NOT_FOUND');
+  if (patch.isActive === false) await deactivateDealsFor({ productId: product._id });
+  return product;
+};
+
+const listProducts = async ({ page = 1, limit = 20, search, category, isActive } = {}) => {
   const filter = {};
-  if (search) filter.title = new RegExp(search, 'i');
-  if (category) filter.category = category;
+  if (search) {
+    filter.$or = [{ title: containsRegex(search) }, { brand: containsRegex(search) }];
+  }
+  if (isActive === 'true') filter.isActive = true;
+  if (isActive === 'false') filter.isActive = false;
+  if (typeof category === 'string' && category) filter.category = category;
   const { page: p, limit: l, skip } = toPageLimit(page, limit);
   const [items, total] = await Promise.all([
     Product.find(filter).sort({ updatedAt: -1 }).skip(skip).limit(l).lean(),
     Product.countDocuments(filter),
   ]);
 
-  const ids = items.map((item) => item._id);
-  const priceStats = ids.length
-    ? await StoreProduct.aggregate([
-        {
-          $match: {
-            productId: { $in: ids },
-            isActive: true,
-            currentPrice: { $gt: 0 },
-          },
-        },
-        {
-          $group: {
-            _id: '$productId',
-            lowestPrice: { $min: '$currentPrice' },
-            highestPrice: { $max: '$currentPrice' },
-            storeCount: { $sum: 1 },
-          },
-        },
-      ])
-    : [];
-  const byProduct = new Map(priceStats.map((row) => [String(row._id), row]));
-
   return {
-    items: items.map((item) => {
-      const stats = byProduct.get(String(item._id));
-      return {
-        ...item,
-        lowestPrice: stats?.lowestPrice ?? null,
-        highestPrice: stats?.highestPrice ?? null,
-        storeCount: stats?.storeCount ?? 0,
-      };
-    }),
+    items: items.map((item) => ({
+      ...item,
+      lowestPrice: item.priceSummary?.lowestPrice ?? null,
+      highestPrice: item.priceSummary?.highestPrice ?? null,
+      storeCount: item.priceSummary?.storeCount ?? 0,
+    })),
     total,
     page: p,
     limit: l,
@@ -140,17 +186,17 @@ const listStoreProducts = async ({
   const filter = {};
   if (isObjectId(storeId)) filter.storeId = storeId;
   if (isObjectId(productId)) filter.productId = productId;
-  if (status && status !== 'undefined') filter.scrapeStatus = status;
+  if (typeof status === 'string' && status && status !== 'undefined') filter.scrapeStatus = status;
 
   const and = [];
   const q = String(search || '').trim();
   if (q) {
     and.push({
       $or: [
-        { title: new RegExp(q, 'i') },
-        { externalProductId: new RegExp(q, 'i') },
-        { productUrl: new RegExp(q, 'i') },
-        { seller: new RegExp(q, 'i') },
+        { title: containsRegex(q) },
+        { externalProductId: containsRegex(q) },
+        { productUrl: containsRegex(q) },
+        { seller: containsRegex(q) },
       ],
     });
   }
@@ -256,7 +302,7 @@ const importLiveStoreProduct = async ({ url, productId } = {}) => {
         asin: details.identifiers?.asin || (slug === 'amazon' ? details.externalProductId : ''),
       },
       attributes: details.attributes || details.variant,
-    });
+    }, { storeId: storeDoc._id, externalProductId: details.externalProductId });
     product = upserted.product;
     created = upserted.created;
   }
@@ -347,7 +393,7 @@ const ingestSearchResults = async ({
           asin: item.identifiers?.asin || (storeSlug === 'amazon' ? item.externalProductId : ''),
         },
         attributes: item.attributes || item.variant,
-      });
+      }, { storeId: storeDoc._id, externalProductId: item.externalProductId });
 
       const storeProduct = await productService.upsertStoreProduct(product._id, {
         storeId: storeDoc._id,
@@ -400,6 +446,7 @@ const scrapeStoresByKeyword = async ({
   forcedBrand,
   category,
   closeBrowserWhenDone = true,
+  onProgress = () => {},
 } = {}) => {
   const q = String(query || '').trim();
   if (!q) {
@@ -474,6 +521,7 @@ const scrapeStoresByKeyword = async ({
         continue;
       }
 
+      onProgress({ store: slug, stage: 'searching', saved: summary.saved });
       let searchItems = [];
       try {
         searchItems = await integration.scraper.searchLive(q, {
@@ -487,6 +535,7 @@ const scrapeStoresByKeyword = async ({
         continue;
       }
 
+      onProgress({ store: slug, stage: 'saving', found: searchItems.length, saved: summary.saved });
       const storeSummary = await ingestSearchResults({
         storeDoc,
         storeSlug: slug,
@@ -565,6 +614,11 @@ const updateStoreProduct = async (id, updates = {}) => {
     }
   }
 
+  if (patch.productUrl || patch.externalProductId) {
+    // New source → check it on the next tick with a clean failure streak
+    Object.assign(patch, { nextCheckAt: new Date(), consecutiveFailureCount: 0, scrapeStatus: 'PENDING' });
+  }
+
   const storeProduct = await StoreProduct.findByIdAndUpdate(id, patch, {
     new: true,
     runValidators: true,
@@ -574,6 +628,10 @@ const updateStoreProduct = async (id, updates = {}) => {
 
   if (!storeProduct) {
     throw new AppError('Store product not found', 404, 'STORE_PRODUCT_NOT_FOUND');
+  }
+  if (patch.isActive === false) await deactivateDealsFor({ storeProductId: storeProduct._id });
+  if (patch.isActive !== undefined) {
+    await refreshProductSummaries([storeProduct.productId?._id || storeProduct.productId]);
   }
 
   return storeProduct;
@@ -599,49 +657,63 @@ const listFailedChecks = async ({ page = 1, limit = 20 } = {}) => {
 };
 
 const getMonitoringStatus = async () => {
-  const [
-    total,
-    pending,
-    success,
-    failed,
-    notFound,
-    outOfStock,
-    neverChecked,
-    repeatedFailures,
-  ] = await Promise.all([
-    StoreProduct.countDocuments({ isActive: true }),
-    StoreProduct.countDocuments({ isActive: true, scrapeStatus: 'PENDING' }),
-    StoreProduct.countDocuments({ isActive: true, scrapeStatus: 'SUCCESS' }),
-    StoreProduct.countDocuments({ isActive: true, scrapeStatus: 'FAILED' }),
-    StoreProduct.countDocuments({ isActive: true, scrapeStatus: 'PRODUCT_NOT_FOUND' }),
-    StoreProduct.countDocuments({ isActive: true, scrapeStatus: 'OUT_OF_STOCK' }),
-    StoreProduct.countDocuments({ isActive: true, lastCheckedAt: null }),
-    StoreProduct.countDocuments({ isActive: true, consecutiveFailureCount: { $gte: 3 } }),
+  const staleThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const [[agg], schedule, recentChanges] = await Promise.all([
+    // One pass over active listings instead of ~10 countDocuments calls
+    StoreProduct.aggregate([
+      { $match: { isActive: true } },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: 1 },
+          pending: { $sum: { $cond: [{ $eq: ['$scrapeStatus', 'PENDING'] }, 1, 0] } },
+          success: { $sum: { $cond: [{ $eq: ['$scrapeStatus', 'SUCCESS'] }, 1, 0] } },
+          failed: { $sum: { $cond: [{ $in: ['$scrapeStatus', ['FAILED', 'TEMPORARILY_UNAVAILABLE']] }, 1, 0] } },
+          productNotFound: { $sum: { $cond: [{ $eq: ['$scrapeStatus', 'PRODUCT_NOT_FOUND'] }, 1, 0] } },
+          outOfStock: { $sum: { $cond: [{ $eq: ['$scrapeStatus', 'OUT_OF_STOCK'] }, 1, 0] } },
+          neverChecked: { $sum: { $cond: [{ $eq: [{ $ifNull: ['$lastCheckedAt', null] }, null] }, 1, 0] } },
+          repeatedFailures: { $sum: { $cond: [{ $gte: ['$consecutiveFailureCount', 3] }, 1, 0] } },
+          staleOver24h: {
+            $sum: {
+              $cond: [
+                { $lt: [{ $ifNull: ['$lastSuccessfulFetchAt', new Date(0)] }, staleThreshold] },
+                1,
+                0,
+              ],
+            },
+          },
+          lastCheckedAt: { $max: '$lastCheckedAt' },
+          lastSuccessfulFetchAt: { $max: '$lastSuccessfulFetchAt' },
+        },
+      },
+    ]),
+    priceMonitoringService.getScheduleStats(),
+    PriceHistory.find({ changeType: { $in: ['DECREASE', 'INCREASE'] } })
+      .sort({ recordedAt: -1 })
+      .limit(8)
+      .populate('storeId', 'name')
+      .populate('productId', 'title')
+      .lean(),
   ]);
 
-  const lastChecked = await StoreProduct.findOne({ lastCheckedAt: { $ne: null } })
-    .sort({ lastCheckedAt: -1 })
-    .select('lastCheckedAt lastSuccessfulFetchAt')
-    .lean();
-
-  const staleThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const staleCount = await StoreProduct.countDocuments({
-    isActive: true,
-    $or: [{ lastSuccessfulFetchAt: null }, { lastSuccessfulFetchAt: { $lt: staleThreshold } }],
-  });
-
+  const a = agg || {};
+  const { currentRun, lastRun } = priceMonitoringService.getRunState();
   return {
-    totalActiveStoreProducts: total,
-    pending,
-    success,
-    failed,
-    productNotFound: notFound,
-    outOfStock,
-    neverChecked,
-    repeatedFailures,
-    staleOver24h: staleCount,
-    lastCheckedAt: lastChecked?.lastCheckedAt || null,
-    lastSuccessfulFetchAt: lastChecked?.lastSuccessfulFetchAt || null,
+    totalActiveStoreProducts: a.total || 0,
+    pending: a.pending || 0,
+    success: a.success || 0,
+    failed: a.failed || 0,
+    productNotFound: a.productNotFound || 0,
+    outOfStock: a.outOfStock || 0,
+    neverChecked: a.neverChecked || 0,
+    repeatedFailures: a.repeatedFailures || 0,
+    staleOver24h: a.staleOver24h || 0,
+    lastCheckedAt: a.lastCheckedAt || null,
+    lastSuccessfulFetchAt: a.lastSuccessfulFetchAt || null,
+    schedule,
+    currentRun,
+    lastRun,
+    recentChanges,
   };
 };
 
@@ -754,9 +826,7 @@ const triggerPriceRefresh = async ({
     return { mode: 'product', productId, results };
   }
 
-  const summary = await priceMonitoringService.runPriceMonitoring({
-    forceAll: forceAll !== false,
-  });
+  const summary = await priceMonitoringService.runPriceMonitoring({ force: forceAll !== false });
   return { mode: 'all', summary };
 };
 
@@ -772,7 +842,7 @@ const listPriceHistoryAdmin = async ({
   const filter = {};
   if (isObjectId(storeProductId)) filter.storeProductId = storeProductId;
   if (isObjectId(storeId)) filter.storeId = storeId;
-  if (changeType && changeType !== 'undefined') filter.changeType = changeType;
+  if (typeof changeType === 'string' && changeType && changeType !== 'undefined') filter.changeType = changeType;
 
   const { page: p, limit: l, skip } = toPageLimit(page, limit);
   const q = String(search || '').trim();
@@ -782,8 +852,8 @@ const listPriceHistoryAdmin = async ({
     if (isObjectId(productId)) productFilter._id = productId;
     if (q) {
       productFilter.$or = [
-        { title: new RegExp(q, 'i') },
-        { brand: new RegExp(q, 'i') },
+        { title: containsRegex(q) },
+        { brand: containsRegex(q) },
       ];
     }
     const products = await Product.find(productFilter).select('_id').lean();
@@ -829,7 +899,7 @@ const listDealsAdmin = async ({
 } = {}) => {
   const filter = {};
   if (isObjectId(storeId)) filter.storeId = storeId;
-  if (dropSeverity && dropSeverity !== 'undefined') filter.dropSeverity = dropSeverity;
+  if (typeof dropSeverity === 'string' && dropSeverity && dropSeverity !== 'undefined') filter.dropSeverity = dropSeverity;
   if (isActive === true || isActive === 'true') filter.isActive = true;
   if (isActive === false || isActive === 'false') filter.isActive = false;
 
@@ -838,14 +908,14 @@ const listDealsAdmin = async ({
 
   if (q) {
     const products = await Product.find({
-      $or: [{ title: new RegExp(q, 'i') }, { brand: new RegExp(q, 'i') }],
+      $or: [{ title: containsRegex(q) }, { brand: containsRegex(q) }],
     })
       .select('_id')
       .lean();
     const productIds = products.map((doc) => doc._id);
     filter.$or = [
-      { title: new RegExp(q, 'i') },
-      { description: new RegExp(q, 'i') },
+      { title: containsRegex(q) },
+      { description: containsRegex(q) },
       ...(productIds.length ? [{ productId: { $in: productIds } }] : []),
     ];
   }
@@ -881,6 +951,8 @@ module.exports = {
   listStores,
   createStore,
   updateStore,
+  updateUser,
+  updateProduct,
   listProducts,
   listStoreProducts,
   importFlipkartStoreProduct,

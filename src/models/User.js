@@ -37,6 +37,10 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    passwordChangedAt: {
+      type: Date,
+      default: null,
+    },
     fcmTokens: {
       type: [String],
       default: [],
@@ -48,11 +52,21 @@ const userSchema = new mongoose.Schema(
 userSchema.pre('save', async function hashPassword(next) {
   if (!this.isModified('password')) return next();
   this.password = await bcrypt.hash(this.password, 12);
+  if (!this.isNew) {
+    // 1s back-dating so a token issued right after the change is still valid
+    this.passwordChangedAt = new Date(Date.now() - 1000);
+  }
   next();
 });
 
 userSchema.methods.comparePassword = async function comparePassword(candidate) {
   return bcrypt.compare(candidate, this.password);
+};
+
+/** True if the JWT (issued at `iat`, seconds) predates the last password change. */
+userSchema.methods.changedPasswordAfter = function changedPasswordAfter(iat) {
+  if (!this.passwordChangedAt || !iat) return false;
+  return Math.floor(this.passwordChangedAt.getTime() / 1000) > iat;
 };
 
 userSchema.methods.toSafeObject = function toSafeObject() {

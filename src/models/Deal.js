@@ -51,6 +51,15 @@ const dealSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+dealSchema.index({ storeProductId: 1, isActive: 1 });
+// At most one active deal per listing (concurrent writers can't create duplicates)
+dealSchema.index(
+  { storeProductId: 1 },
+  { unique: true, partialFilterExpression: { isActive: true }, name: 'one_active_deal_per_listing' }
+);
+dealSchema.index({ isActive: 1, discountPercent: -1, createdAt: -1 });
+dealSchema.index({ isActive: 1, expiresAt: 1 });
+
 const Deal = mongoose.model('Deal', dealSchema);
 
 module.exports = Deal;

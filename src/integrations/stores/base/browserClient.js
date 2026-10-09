@@ -9,6 +9,10 @@ const { CollectionError, FETCH_ERRORS } = require('./store.types');
  * Lazy-loads playwright so the app starts without browsers installed.
  */
 let browserPromise = null;
+// Sessions in flight. closeBrowser() defers while > 0 so one caller (e.g. an admin import)
+// can't kill the shared browser under a running monitor batch.
+let activeSessions = 0;
+let closeRequested = false;
 
 const DEFAULT_BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -207,13 +211,21 @@ const openBrowserSession = async (options = {}) => {
   } = options;
 
   const browser = await getBrowser();
-  const context = await browser.newContext(buildContextOptions({ locale, userAgent }));
+  activeSessions += 1;
+  let context;
+  try {
+    context = await browser.newContext(buildContextOptions({ locale, userAgent }));
+  } catch (err) {
+    activeSessions -= 1;
+    throw err;
+  }
   await context.addInitScript(() => {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
   });
 
   const page = await context.newPage();
   await attachPageGuards(page);
+  let closed = false;
 
   return {
     page,
@@ -239,7 +251,11 @@ const openBrowserSession = async (options = {}) => {
       return { html, url: page.url() };
     },
     async close() {
+      if (closed) return;
+      closed = true;
       await context.close().catch(() => {});
+      activeSessions = Math.max(0, activeSessions - 1);
+      if (closeRequested && activeSessions === 0) await closeBrowser();
     },
   };
 };
@@ -274,7 +290,16 @@ const fetchRenderedHtml = async (url, options = {}) => {
   }
 };
 
-const closeBrowser = async () => {
+/**
+ * Close the shared browser to free memory. Deferred until in-flight sessions finish
+ * unless { force: true } (shutdown).
+ */
+const closeBrowser = async ({ force = false } = {}) => {
+  if (!force && activeSessions > 0) {
+    closeRequested = true;
+    return;
+  }
+  closeRequested = false;
   if (browserPromise) {
     try {
       const browser = await browserPromise;

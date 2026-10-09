@@ -13,6 +13,7 @@ const {
 } = require('./Notification');
 const Deal = require('./Deal');
 const Brand = require('./Brand');
+const Lock = require('./Lock');
 
 module.exports = {
   User,
@@ -33,4 +34,5 @@ module.exports = {
   NOTIFICATION_STATUS,
   Deal,
   Brand,
+  Lock,
 };

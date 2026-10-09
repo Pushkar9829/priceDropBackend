@@ -11,6 +11,17 @@ const errorHandler = (err, req, res, next) => {
   let code = err.code || 'INTERNAL_ERROR';
   let details = err.details || null;
 
+  // body-parser errors: report as client errors, not INTERNAL_ERROR
+  if (err.type === 'entity.parse.failed') {
+    statusCode = 400;
+    code = 'INVALID_JSON';
+    message = 'Request body is not valid JSON';
+  } else if (err.type === 'entity.too.large') {
+    statusCode = 413;
+    code = 'PAYLOAD_TOO_LARGE';
+    message = 'Request body is too large';
+  }
+
   if (err.name === 'ValidationError') {
     statusCode = 400;
     code = 'VALIDATION_ERROR';

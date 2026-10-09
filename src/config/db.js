@@ -3,9 +3,11 @@ const mongoose = require('mongoose');
 const config = require('./index');
 const logger = require('../utils/logger');
 
-// Windows/ISP DNS often fails MongoDB SRV lookups for Atlas
-if (String(config.mongodbUri || '').includes('mongodb+srv://')) {
-  dns.setServers(['8.8.8.8', '1.1.1.1']);
+// Some Windows/ISP resolvers fail MongoDB SRV lookups for Atlas. This changes DNS for the
+// whole process (SMTP, scraping), so only do it in development or when explicitly asked.
+const dnsOverride = process.env.MONGODB_DNS_SERVERS || (config.env !== 'production' ? '8.8.8.8,1.1.1.1' : '');
+if (dnsOverride && String(config.mongodbUri || '').includes('mongodb+srv://')) {
+  dns.setServers(dnsOverride.split(',').map((x) => x.trim()).filter(Boolean));
 }
 
 const connectDB = async () => {

@@ -119,10 +119,10 @@ const catalog = [
 ];
 
 const STORE_LOGOS = {
-  amazon: 'https://logo.clearbit.com/amazon.in',
-  flipkart: 'https://logo.clearbit.com/flipkart.com',
-  myntra: 'https://logo.clearbit.com/myntra.com',
-  croma: 'https://logo.clearbit.com/croma.com',
+  amazon: 'https://www.google.com/s2/favicons?domain=amazon.in&sz=128',
+  flipkart: 'https://www.google.com/s2/favicons?domain=flipkart.com&sz=128',
+  myntra: 'https://www.google.com/s2/favicons?domain=myntra.com&sz=128',
+  croma: 'https://www.google.com/s2/favicons?domain=croma.com&sz=128',
 };
 
 const priceState = new Map();

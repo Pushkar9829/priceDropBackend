@@ -25,6 +25,8 @@ class MyntraAdapter extends StoreAdapter {
   }
 
   buildProductUrl(externalProductId, existingUrl) {
+    // The listing's stored URL always wins (live myntra.com page or a fixture URL)
+    if (existingUrl && !existingUrl.includes('demo.myntra.example')) return existingUrl;
     const config = require('../../../config');
     if (config.scraper.mode === 'http' || config.scraper.mode === 'auto') {
       return `${config.scraper.fixtureBase}/myntra/p/${externalProductId}`;

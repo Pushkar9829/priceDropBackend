@@ -1,6 +1,7 @@
 const nodemailer = require('nodemailer');
 const config = require('../config');
 const logger = require('../utils/logger');
+const AppError = require('../utils/AppError');
 const {
   Notification,
   NOTIFICATION_TYPES,
@@ -13,13 +14,17 @@ let mailTransporter = null;
 
 const getMailer = () => {
   if (mailTransporter) return mailTransporter;
-  if (!config.email.user || !config.email.pass) {
+  if (!config.email.host || !config.email.user || !config.email.pass) {
     return null;
   }
   mailTransporter = nodemailer.createTransport({
     host: config.email.host,
     port: config.email.port,
     secure: config.email.secure,
+    // A slow SMTP server must not stall the price monitor (alerts send inside a check)
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
     auth: {
       user: config.email.user,
       pass: config.email.pass,
@@ -34,6 +39,10 @@ const getMailer = () => {
 const sendEmail = async ({ to, subject, text, html }) => {
   const transporter = getMailer();
   if (!transporter) {
+    if (config.env === 'production') {
+      // Not configured: record the email as not sent (never pretend), no PII in logs
+      return { sent: false, reason: 'smtp_not_configured' };
+    }
     logger.info('Email (dev/console)', { to, subject, text });
     return { sent: true, provider: 'console' };
   }
@@ -113,11 +122,16 @@ const createAndSend = async ({
     }
 
     if (channel === NOTIFICATION_CHANNELS.EMAIL) {
-      await sendEmail({
+      const emailResult = await sendEmail({
         to: user.email,
         subject: title,
         text: message,
       });
+      if (!emailResult?.sent) {
+        notification.status = NOTIFICATION_STATUS.FAILED;
+        await notification.save();
+        return notification;
+      }
     } else if (channel === NOTIFICATION_CHANNELS.PUSH) {
       const pushResult = await sendPush({
         tokens: user.fcmTokens || [],
@@ -155,6 +169,11 @@ const createAndSend = async ({
   return notification;
 };
 
+const hasPushTokens = async (userId) => {
+  const user = await User.findById(userId).select('fcmTokens').lean();
+  return Boolean(user?.fcmTokens?.length);
+};
+
 const sendPriceAlertNotification = async ({
   userId,
   productId,
@@ -167,19 +186,16 @@ const sendPriceAlertNotification = async ({
   storeName,
   productUrl,
 }) => {
-  const diff =
-    previousPrice != null ? Math.abs(previousPrice - currentPrice) : null;
-  const message = [
-    `"${title}" price alert triggered.`,
-    storeName ? `Store: ${storeName}.` : null,
-    previousPrice != null
-      ? `Price dropped from ₹${previousPrice} to ₹${currentPrice}${diff != null ? ` (₹${diff} off)` : ''}.`
-      : `Current price: ₹${currentPrice}.`,
-    `Your target: ₹${targetPrice}.`,
-    productUrl ? `Link: ${productUrl}` : null,
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const inr = (n) => `₹${Math.round(Number(n)).toLocaleString('en-IN')}`;
+  const dropped = previousPrice != null && previousPrice > currentPrice;
+  const at = storeName ? ` at ${storeName}` : '';
+  // In-app copy stays short; the email adds the store link
+  const message = dropped
+    ? `${title} dropped from ${inr(previousPrice)} to ${inr(currentPrice)}${at} — at or below your ${inr(targetPrice)} target.`
+    : `${title} is ${inr(currentPrice)}${at} — at or below your ${inr(targetPrice)} target.`;
+  const emailText = productUrl ? `${message}
+
+Buy it here: ${productUrl}` : message;
 
   const meta = {
     productId,
@@ -196,53 +212,62 @@ const sendPriceAlertNotification = async ({
     createAndSend({
       userId,
       type: NOTIFICATION_TYPES.PRICE_ALERT,
-      title: 'PRICE DROP ALERT',
-      message,
+      title: 'Price drop alert',
+      message: emailText,
       channel: NOTIFICATION_CHANNELS.EMAIL,
       meta,
     }),
+    hasPushTokens(userId).then((ok) =>
+      ok
+        ? createAndSend({
+            userId,
+            type: NOTIFICATION_TYPES.PRICE_ALERT,
+            title: 'Price drop alert',
+            message,
+            channel: NOTIFICATION_CHANNELS.PUSH,
+            meta,
+          })
+        : null
+    ),
     createAndSend({
       userId,
       type: NOTIFICATION_TYPES.PRICE_ALERT,
-      title: 'PRICE DROP ALERT',
-      message,
-      channel: NOTIFICATION_CHANNELS.PUSH,
-      meta,
-    }),
-    createAndSend({
-      userId,
-      type: NOTIFICATION_TYPES.PRICE_ALERT,
-      title: 'PRICE DROP ALERT',
+      title: 'Price drop alert',
       message,
       channel: NOTIFICATION_CHANNELS.IN_APP,
       meta,
     }),
   ]);
 
-  // Prefer EMAIL/IN_APP for anySent — PUSH may fail without FCM tokens in V1
-  const anySent = results.some(
-    (n) =>
-      n?.status === NOTIFICATION_STATUS.SENT &&
-      (n.channel === NOTIFICATION_CHANNELS.EMAIL ||
-        n.channel === NOTIFICATION_CHANNELS.IN_APP ||
-        n.channel === NOTIFICATION_CHANNELS.PUSH)
-  );
+  // Any successful channel counts — PUSH commonly fails in V1 (no FCM tokens registered)
+  const anySent = results.some((n) => n?.status === NOTIFICATION_STATUS.SENT);
   return { anySent, results };
 };
 
+// Users see one copy per event: the IN_APP record. EMAIL/PUSH records are delivery logs (admin view).
+const userInboxFilter = (userId) => ({ userId, channel: NOTIFICATION_CHANNELS.IN_APP });
+
 const listNotifications = async (userId, { page = 1, limit = 20 } = {}) => {
-  const skip = (page - 1) * limit;
-  const [items, total] = await Promise.all([
-    Notification.find({ userId }).sort({ createdAt: -1 }).skip(skip).limit(limit),
-    Notification.countDocuments({ userId }),
+  const p = Math.max(1, page);
+  const l = Math.min(100, Math.max(1, limit));
+  const filter = userInboxFilter(userId);
+  const [items, total, unread] = await Promise.all([
+    Notification.find(filter).sort({ createdAt: -1 }).skip((p - 1) * l).limit(l).lean(),
+    Notification.countDocuments(filter),
+    countUnread(userId),
   ]);
-  return { items, total, page, limit, pages: Math.ceil(total / limit) };
+  return { items, total, unread, page: p, limit: l, pages: Math.ceil(total / l) || 1 };
 };
+
+const countUnread = (userId) =>
+  Notification.countDocuments({
+    ...userInboxFilter(userId),
+    status: { $ne: NOTIFICATION_STATUS.READ },
+  });
 
 const markAsRead = async (userId, notificationId) => {
   const notification = await Notification.findOne({ _id: notificationId, userId });
   if (!notification) {
-    const AppError = require('../utils/AppError');
     throw new AppError('Notification not found', 404, 'NOTIFICATION_NOT_FOUND');
   }
   notification.status = NOTIFICATION_STATUS.READ;
@@ -251,11 +276,21 @@ const markAsRead = async (userId, notificationId) => {
   return notification;
 };
 
+const markAllAsRead = async (userId) => {
+  const result = await Notification.updateMany(
+    { ...userInboxFilter(userId), status: { $ne: NOTIFICATION_STATUS.READ } },
+    { $set: { status: NOTIFICATION_STATUS.READ, readAt: new Date() } }
+  );
+  return result.modifiedCount || 0;
+};
+
 module.exports = {
   sendEmail,
   sendPush,
   createAndSend,
   sendPriceAlertNotification,
   listNotifications,
+  countUnread,
   markAsRead,
+  markAllAsRead,
 };

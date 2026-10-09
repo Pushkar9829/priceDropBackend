@@ -19,10 +19,15 @@ const validateNormalizedProduct = (data, { requireUrl = false } = {}) => {
     errors.push('title is required');
   }
 
-  if (data.currentPrice == null || typeof data.currentPrice !== 'number') {
-    errors.push('price must be numeric');
-  } else if (!(data.currentPrice > 0)) {
-    errors.push('price must be greater than zero');
+  // Out-of-stock pages often hide the price. That is a valid observation (stock changed),
+  // not a scrape failure — callers keep the last known price and record the stock change.
+  const outOfStockWithoutPrice = data.availability === 'OUT_OF_STOCK' && !(data.currentPrice > 0);
+  if (!outOfStockWithoutPrice) {
+    if (data.currentPrice == null || typeof data.currentPrice !== 'number') {
+      errors.push('price must be numeric');
+    } else if (!(data.currentPrice > 0)) {
+      errors.push('price must be greater than zero');
+    }
   }
 
   if (!data.currency || typeof data.currency !== 'string') {

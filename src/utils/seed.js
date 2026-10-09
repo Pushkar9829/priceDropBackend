@@ -9,6 +9,7 @@ const {
   Product,
   StoreProduct,
   PriceHistory,
+  Brand,
   SCRAPE_STATUS,
 } = require('../models');
 const { createSlug, normalizeTitle } = require('./helpers');
@@ -24,6 +25,7 @@ const productUrlFor = (storeKey, externalId) => {
 };
 
 const seed = async () => {
+  require('./scriptGuard').assertSafeTarget('seed');
   await connectDB();
 
   logger.info('Seeding database...');
@@ -34,6 +36,7 @@ const seed = async () => {
     Product.deleteMany({}),
     StoreProduct.deleteMany({}),
     PriceHistory.deleteMany({}),
+    Brand.deleteMany({}),
   ]);
 
   const Watchlist = require('../models/Watchlist');
@@ -211,6 +214,29 @@ const seed = async () => {
   dealCandidates.sort((a, b) => b.discountPercent - a.discountPercent);
   const deals = await Deal.insertMany(dealCandidates.slice(0, 6));
 
+  const brandCounts = {};
+  for (const item of catalog) {
+    if (!item.brand) continue;
+    if (!brandCounts[item.brand]) {
+      brandCounts[item.brand] = { count: 0, category: item.category || 'Electronics' };
+    }
+    brandCounts[item.brand].count += 1;
+  }
+  const brands = await Brand.insertMany(
+    Object.entries(brandCounts).map(([name, meta]) => ({
+      name,
+      slug: createSlug(name),
+      category: meta.category,
+      searchKeyword: name,
+      scrapeStatus: 'done',
+      lastScrapedAt: new Date(),
+      savedCount: meta.count,
+      isActive: true,
+    }))
+  );
+
+  await require('./monitoringBackfill').backfillMonitoringData();
+
   logger.info('Seed completed', {
     admin: admin.email,
     user: demoUser.email,
@@ -218,6 +244,7 @@ const seed = async () => {
     products: catalog.length,
     storeProducts: storeProductCount,
     deals: deals.length,
+    brands: brands.length,
     sampleImage: catalog[0].images[0],
   });
 

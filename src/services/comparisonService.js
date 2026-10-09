@@ -1,4 +1,4 @@
-const { StoreProduct, PriceHistory } = require('../models');
+const { Product, StoreProduct, PriceHistory } = require('../models');
 const AppError = require('../utils/AppError');
 const { round2 } = require('../utils/helpers');
 
@@ -6,17 +6,23 @@ const { round2 } = require('../utils/helpers');
  * Build price comparison from latest stored prices (not live HTTP fetches).
  */
 const getComparison = async (productId) => {
-  const storeProducts = await StoreProduct.find({
-    productId,
-    isActive: true,
-  }).populate('storeId', 'name slug logo domain isActive');
-
-  if (!storeProducts.length) {
-    throw new AppError('No store listings found for this product', 404, 'NO_STORE_PRODUCTS');
+  const product = await Product.exists({ _id: productId, isActive: true });
+  if (!product) {
+    throw new AppError('Product not found', 404, 'PRODUCT_NOT_FOUND');
   }
 
+  const all = await StoreProduct.find({
+    productId,
+    isActive: true,
+  })
+    .populate('storeId', 'name slug logo domain isActive')
+    .lean();
+
+  // Listings from disabled/deleted stores are hidden entirely
+  const storeProducts = all.filter((sp) => sp.storeId && sp.storeId.isActive !== false);
+
   const available = storeProducts.filter(
-    (sp) => sp.availability !== 'OUT_OF_STOCK' && sp.storeId?.isActive !== false
+    (sp) => sp.availability !== 'OUT_OF_STOCK' && sp.currentPrice > 0
   );
 
   const listings = storeProducts.map((sp) => ({
@@ -43,8 +49,13 @@ const getComparison = async (productId) => {
     affiliateUrl: sp.affiliateUrl,
     seller: sp.seller,
     lastCheckedAt: sp.lastCheckedAt,
+    nextCheckAt: sp.nextCheckAt,
+    scrapeStatus: sp.scrapeStatus,
     isBestPrice: false,
   }));
+  listings.forEach((l) => {
+    l.savingsVsMrp = l.mrp && l.mrp > l.currentPrice ? round2(l.mrp - l.currentPrice) : null;
+  });
 
   const prices = available.map((sp) => sp.currentPrice);
   const lowestPrice = prices.length ? Math.min(...prices) : null;
@@ -86,6 +97,8 @@ const getComparison = async (productId) => {
       bestStore,
       availableCount: available.length,
       totalListings: listings.length,
+      lastCheckedAt: listings.reduce((m, l) => (l.lastCheckedAt && (!m || l.lastCheckedAt > m) ? l.lastCheckedAt : m), null),
+      nextCheckAt: listings.reduce((m, l) => (l.nextCheckAt && (!m || l.nextCheckAt < m) ? l.nextCheckAt : m), null),
       currency: 'INR',
     },
   };
@@ -95,6 +108,7 @@ const getComparison = async (productId) => {
  * Price history stats for a product (optionally filtered by store product).
  */
 const getPriceHistory = async (productId, { storeProductId, days = 90 } = {}) => {
+  days = Math.min(730, Math.max(1, parseInt(days, 10) || 90));
   const since = new Date();
   since.setDate(since.getDate() - days);
 
@@ -105,11 +119,13 @@ const getPriceHistory = async (productId, { storeProductId, days = 90 } = {}) =>
   if (storeProductId) filter.storeProductId = storeProductId;
 
   const history = await PriceHistory.find(filter)
-    .sort({ recordedAt: 1 })
+    .sort({ recordedAt: -1 })
     .populate('storeId', 'name slug')
-    .lean();
+    .limit(5000)
+    .lean()
+    .then((rows) => rows.reverse()); // newest 5000 kept, returned oldest → newest
 
-  const prices = history.map((h) => h.newPrice);
+  const prices = history.map((h) => h.newPrice).filter((p) => p > 0);
   const stats = {
     currentPrice: prices.length ? prices[prices.length - 1] : null,
     lowestHistoricalPrice: prices.length ? Math.min(...prices) : null,

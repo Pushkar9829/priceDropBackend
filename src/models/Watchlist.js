@@ -14,6 +14,11 @@ const watchlistSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    /** Lowest price when the user saved it — lets the UI show "dropped ₹X since you saved". */
+    addedPrice: {
+      type: Number,
+      default: null,
+    },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

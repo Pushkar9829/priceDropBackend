@@ -4,7 +4,8 @@ const {
   extractRam,
 } = require('../utils/helpers');
 const config = require('../config');
-const { Product } = require('../models');
+const { Product, StoreProduct } = require('../models');
+const logger = require('../utils/logger');
 
 /**
  * Product matching with confidence scoring.
@@ -120,13 +121,40 @@ const normalizeStorage = (val) => {
 /**
  * Find best matching canonical product or null if confidence too low.
  */
-const findBestMatch = async (incoming) => {
+const findBestMatch = async (incoming, { storeId } = {}) => {
   const filter = { isActive: true };
   if (incoming.brand) {
     filter.brand = new RegExp(`^${escapeRegex(incoming.brand)}$`, 'i');
   }
 
-  const candidates = await Product.find(filter).limit(50);
+  // Rank candidates by text relevance so large brands don't hide the true match past the cap
+  let candidates = null;
+  if (incoming.title) {
+    try {
+      candidates = await Product.find(
+        { ...filter, $text: { $search: incoming.title } },
+        { score: { $meta: 'textScore' } }
+      )
+        .sort({ score: { $meta: 'textScore' } })
+        .limit(50);
+    } catch (err) {
+      logger.debug('Matching text search unavailable', { error: err.message });
+    }
+  }
+  if (!candidates || !candidates.length) {
+    candidates = await Product.find(filter).sort({ updatedAt: -1 }).limit(50);
+  }
+
+  // A product may hold only one listing per store — skip products already taken by this store
+  if (storeId && candidates.length) {
+    const taken = await StoreProduct.find({
+      storeId,
+      productId: { $in: candidates.map((c) => c._id) },
+    }).distinct('productId');
+    const takenSet = new Set(taken.map(String));
+    candidates = candidates.filter((c) => !takenSet.has(String(c._id)));
+  }
+
   let best = null;
 
   for (const candidate of candidates) {

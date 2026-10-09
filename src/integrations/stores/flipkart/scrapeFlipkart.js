@@ -119,7 +119,7 @@ const run = async () => {
         );
       } else {
         const summary = await priceMonitoringService.runPriceMonitoring({
-          forceAll: true,
+          force: true,
           storeId: flipkart._id,
         });
         logger.info('Flipkart monitoring completed', summary);

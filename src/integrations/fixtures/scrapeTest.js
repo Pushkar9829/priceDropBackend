@@ -18,6 +18,7 @@ const { fetchHtml } = require('../stores/base/httpClient');
 const AmazonParser = require('../stores/amazon/amazon.parser');
 
 const run = async () => {
+  require('../../utils/scriptGuard').assertSafeTarget('scrape:test');
   const fixtureBase = config.scraper.fixtureBase;
 
   logger.info('Scrape test starting', {
@@ -78,7 +79,7 @@ const run = async () => {
   }
   logger.info('Pointed store products at fixture URLs', { updated });
 
-  const summary = await priceMonitoringService.runPriceMonitoring({ forceAll: true });
+  const summary = await priceMonitoringService.runPriceMonitoring({ force: true });
   logger.info('Monitoring via HTTP scrape completed', summary);
 
   if (summary.failed === summary.total && summary.total > 0) {

@@ -138,6 +138,13 @@ const storeProductSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    /** All-time extremes for this listing — avoids scanning history on every change. */
+    lowestEverPrice: { type: Number, default: null },
+    highestEverPrice: { type: Number, default: null },
+    /** When the scheduler should check this listing next (null = as soon as possible). */
+    nextCheckAt: { type: Date, default: null },
+    /** Demand tier at last scheduling: HOT (alerts/watchers), NORMAL, COLD. */
+    monitorTier: { type: String, enum: ['HOT', 'NORMAL', 'COLD'], default: 'NORMAL' },
   },
   { timestamps: true }
 );
@@ -147,6 +154,8 @@ storeProductSchema.index({ storeId: 1, externalProductId: 1 }, { unique: true })
 storeProductSchema.index({ lastCheckedAt: 1, isActive: 1 });
 storeProductSchema.index({ scrapeStatus: 1, consecutiveFailureCount: -1 });
 storeProductSchema.index({ storeId: 1, scrapeStatus: 1 });
+storeProductSchema.index({ isActive: 1, nextCheckAt: 1 });
+storeProductSchema.index({ productId: 1, isActive: 1, currentPrice: 1 });
 
 const StoreProduct = mongoose.model('StoreProduct', storeProductSchema);
 

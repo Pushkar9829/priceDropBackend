@@ -21,6 +21,7 @@ const { fetchHtml } = require('../base/httpClient');
 const AmazonParser = require('./amazon.parser');
 
 const run = async () => {
+  require('../../../utils/scriptGuard').assertSafeTarget('scrape:amazon');
   const live = creatorsApi.isConfigured();
 
   logger.info('Amazon scrape starting', {
@@ -109,7 +110,7 @@ const run = async () => {
   }
 
   const summary = await priceMonitoringService.runPriceMonitoring({
-    forceAll: true,
+    force: true,
     storeId: amazon._id,
   });
 
