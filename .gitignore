@@ -9,3 +9,8 @@ dist/
 *.swp
 npm-debug.log*
 .nyc_output/
+
+# Any env file except the committed templates
+.env.*
+!.env.example
+!.env.production.example

@@ -10,6 +10,7 @@ const {
 } = require('../models');
 const { createSlug } = require('../utils/helpers');
 const { containsRegex } = require('../utils/regex');
+const { inferBrand } = require('../utils/brandInference');
 const AppError = require('../utils/AppError');
 const priceMonitoringService = require('./priceMonitoringService');
 const { deactivateDealsFor } = require('./dealService');
@@ -383,10 +384,12 @@ const ingestSearchResults = async ({
         continue;
       }
 
+      // Search results rarely carry a brand — recover it (and its category) from the title
+      const inferred = !forcedBrand && !item.brand ? inferBrand(item.title) : null;
       const { product, created } = await productService.upsertCanonicalProduct({
         title: item.title,
-        brand: forcedBrand || item.brand,
-        category: category || item.category,
+        brand: forcedBrand || item.brand || inferred?.name,
+        category: category || item.category || inferred?.category,
         images: item.images,
         identifiers: {
           ...(item.identifiers || {}),

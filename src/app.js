@@ -77,6 +77,12 @@ app.use(config.apiPrefix, (req, res, next) => {
   next();
 });
 
+// Root: lightweight status for uptime checks / people opening the backend URL in a browser
+app.get('/', (req, res) => {
+  res.json({ success: true, service: 'pricecompare-api', health: `${config.apiPrefix}/health` });
+});
+app.head('/', (req, res) => res.status(200).end());
+
 app.use(config.apiPrefix, routes);
 
 app.use(notFound);
