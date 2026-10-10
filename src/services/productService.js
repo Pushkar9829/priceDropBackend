@@ -64,7 +64,13 @@ const enrichWithPrices = async (products) => {
  */
 const buildSearchFilter = async (q) => {
   const query = String(q || '').trim();
-  if (!query) return { isActive: true };
+  if (!query) {
+    return {
+      isActive: true,
+      title: { $nin: [null, ''] },
+      'priceSummary.lowestPrice': { $gt: 0 },
+    };
+  }
 
   const slug = createSlug(query);
   const brandDoc = await Brand.findOne({
@@ -410,7 +416,14 @@ const listCategories = async () => {
     return categoryCache.data;
   }
   const rows = await Product.aggregate([
-    { $match: { isActive: true, category: { $nin: [null, ''] } } },
+    {
+      $match: {
+        isActive: true,
+        category: { $nin: [null, ''] },
+        title: { $nin: [null, ''] },
+        'priceSummary.lowestPrice': { $gt: 0 },
+      },
+    },
     { $group: { _id: '$category', count: { $sum: 1 } } },
     { $sort: { count: -1 } },
     { $limit: 50 },
