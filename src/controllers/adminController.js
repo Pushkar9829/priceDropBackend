@@ -94,13 +94,60 @@ const refreshPrices = asyncHandler(async (req, res) => {
   return accepted(res, job, 'Full price refresh started');
 });
 
+// ---- Affiliate (Cuelinks + Travelpayouts) — all editable without a redeploy ----
+const affiliateSettings = asyncHandler(async (req, res) => {
+  const settingsService = require('../services/settingsService');
+  return ApiResponse.success(res, settingsService.adminView(await settingsService.getAffiliateSettings()));
+});
+
+const updateAffiliateSettings = asyncHandler(async (req, res) => {
+  const settingsService = require('../services/settingsService');
+  const saved = await settingsService.updateAffiliateSettings(req.body || {}, req.user?._id);
+  require('./offerController').clearCache();
+  return ApiResponse.success(res, settingsService.adminView(saved), 'Settings saved');
+});
+
+const affiliateStatus = asyncHandler(async (req, res) =>
+  ApiResponse.success(res, await require('../services/cuelinksService').adminStatus())
+);
+
+const listAffiliateCampaigns = asyncHandler(async (req, res) => {
+  const s = (v) => (typeof v === 'string' ? v.slice(0, 100) : undefined);
+  const { page, limit } = req.query;
+  const data = await require('../services/cuelinksService').adminListCampaigns({
+    q: s(req.query.q), category: s(req.query.category), status: s(req.query.status), visibility: s(req.query.visibility), page, limit,
+  });
+  return ApiResponse.success(res, data);
+});
+
+const updateAffiliateCampaign = asyncHandler(async (req, res) => {
+  const data = await require('../services/cuelinksService').adminUpdateCampaign(req.params.id, req.body || {});
+  require('./offerController').clearCache();
+  return ApiResponse.success(res, data, 'Store updated');
+});
+
+const listAffiliateOffers = asyncHandler(async (req, res) => {
+  const s = (v) => (typeof v === 'string' ? v.slice(0, 100) : undefined);
+  const { page, limit } = req.query;
+  const data = await require('../services/cuelinksService').adminListOffers({
+    q: s(req.query.q), store: s(req.query.store), visibility: s(req.query.visibility), page, limit,
+  });
+  return ApiResponse.success(res, data);
+});
+
+const updateAffiliateOffer = asyncHandler(async (req, res) => {
+  const data = await require('../services/cuelinksService').adminUpdateOffer(req.params.id, req.body || {});
+  require('./offerController').clearCache();
+  return ApiResponse.success(res, data, 'Offer updated');
+});
+
 /** Pull the latest Cuelinks stores + coupons now (needs CUELINKS_API_KEY). */
 const syncAffiliate = asyncHandler(async (req, res) => {
   if (await jobRegistry.hasRunning('affiliate-sync')) {
     throw new AppError('An affiliate sync is already running', 409, 'JOB_RUNNING');
   }
   const job = await jobRegistry.startJob('affiliate-sync', 'Sync Cuelinks stores and offers', () =>
-    require('../services/cuelinksService').syncFromApi()
+    require('../services/cuelinksService').syncFromApi({ trigger: 'manual' })
   );
   return accepted(res, job, 'Affiliate sync started');
 });
@@ -183,6 +230,13 @@ const updateDeal = asyncHandler(async (req, res) => {
 
 module.exports = {
   syncAffiliate,
+  affiliateSettings,
+  updateAffiliateSettings,
+  affiliateStatus,
+  listAffiliateCampaigns,
+  updateAffiliateCampaign,
+  listAffiliateOffers,
+  updateAffiliateOffer,
   dashboard,
   listUsers,
   updateUser,

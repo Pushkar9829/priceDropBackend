@@ -41,12 +41,13 @@ const startJobs = () => {
 
   tasks.push(cron.schedule(config.cron.priceMonitor, tick));
 
-  // Daily Cuelinks stores + coupons refresh (only when an API key is configured)
-  if (config.cuelinks.apiKey && cron.validate(config.cuelinks.syncCron)) {
+  // Daily Cuelinks stores + coupons refresh — runs only if enabled in Admin → Affiliate settings
+  // and an API key is set there (or in CUELINKS_API_KEY)
+  if (cron.validate(config.cuelinks.syncCron)) {
     tasks.push(
       cron.schedule(config.cuelinks.syncCron, () =>
         require('../services/cuelinksService')
-          .syncFromApi()
+          .scheduledSync()
           .catch((err) => logger.error('Affiliate sync failed', { error: err.message }))
       )
     );

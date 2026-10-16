@@ -38,6 +38,13 @@ router.post('/products/:productId/refresh', v.mongoIdParam('productId'), validat
 
 // Background jobs (keyword scrape, full refresh, batch retry)
 router.post('/affiliate/sync', adminController.syncAffiliate);
+router.get('/affiliate/settings', adminController.affiliateSettings);
+router.put('/affiliate/settings', adminController.updateAffiliateSettings);
+router.get('/affiliate/status', adminController.affiliateStatus);
+router.get('/affiliate/campaigns', adminController.listAffiliateCampaigns);
+router.patch('/affiliate/campaigns/:id', v.mongoIdParam('id'), validate, adminController.updateAffiliateCampaign);
+router.get('/affiliate/offers', adminController.listAffiliateOffers);
+router.patch('/affiliate/offers/:id', v.mongoIdParam('id'), validate, adminController.updateAffiliateOffer);
 router.get('/jobs', adminController.listJobs);
 router.get('/jobs/:id', adminController.getJob);
 

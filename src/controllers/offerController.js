@@ -1,4 +1,5 @@
 const cuelinksService = require('../services/cuelinksService');
+const settingsService = require('../services/settingsService');
 const ApiResponse = require('../utils/ApiResponse');
 const asyncHandler = require('../utils/asyncHandler');
 const { createTtlCache } = require('../utils/ttlCache');
@@ -31,4 +32,19 @@ const forDomain = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { items: data });
 });
 
-module.exports = { list, stores, store, forDomain };
+/** Public site settings the frontend needs (sections on/off, Cuelinks channel, travel widgets). */
+const siteConfig = asyncHandler(async (req, res) => {
+  // Admin changes must show on the next page load; the server keeps its own 30s copy
+  res.set('Cache-Control', 'no-cache');
+  return ApiResponse.success(res, settingsService.publicConfig(await settingsService.getAffiliateSettings()));
+});
+
+const travel = asyncHandler(async (req, res) => {
+  const data = await cache.get('travel', () => cuelinksService.getTravel());
+  return ApiResponse.success(res, data);
+});
+
+/** Called after admin changes so the public pages update immediately. */
+const clearCache = () => cache.clear();
+
+module.exports = { list, stores, store, forDomain, siteConfig, travel, clearCache };

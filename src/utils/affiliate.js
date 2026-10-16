@@ -1,4 +1,3 @@
-const config = require('../config');
 
 const ALREADY_TRACKED = /(^|\.)(linksredirect\.com|clnk\.in)$/i;
 
@@ -18,7 +17,8 @@ const outboundUrl = (listing, subid) => {
   } catch {
     return url;
   }
-  const cid = config.affiliate.cuelinksCid;
+  // Lazy require: settingsService → models → … must not load during config bootstrap
+  const cid = require('../services/settingsService').peekAffiliateSettings().cuelinks.cid;
   if (!cid || ALREADY_TRACKED.test(host)) return url;
   const sub = subid ? `&subid=${encodeURIComponent(subid)}` : '';
   return `https://linksredirect.com/?cid=${encodeURIComponent(cid)}${sub}&source=js&url=${encodeURIComponent(url)}`;

@@ -17,6 +17,9 @@ const affiliateOfferSchema = new mongoose.Schema(
     trackingUrl: { type: String, required: true },
     startDate: { type: Date, default: null },
     endDate: { type: Date, default: null },
+    // Admin overrides — the sync never touches these
+    adminHidden: { type: Boolean, default: false },
+    pinned: { type: Boolean, default: false },
     syncedAt: { type: Date, default: Date.now },
   },
   // Collections + indexes are created by the importer (cuelinksService.importData), not at

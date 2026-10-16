@@ -16,6 +16,7 @@ const Brand = require('./Brand');
 const Lock = require('./Lock');
 const AffiliateCampaign = require('./AffiliateCampaign');
 const AffiliateOffer = require('./AffiliateOffer');
+const SiteSetting = require('./SiteSetting');
 
 module.exports = {
   User,
@@ -39,4 +40,5 @@ module.exports = {
   Lock,
   AffiliateCampaign,
   AffiliateOffer,
+  SiteSetting,
 };
