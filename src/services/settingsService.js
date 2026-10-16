@@ -14,7 +14,7 @@ const STATUS_KEY = 'affiliate_status';
 const defaults = () => ({
   sections: { offers: true, stores: true, travel: true },
   cuelinks: { cid: config.affiliate.cuelinksCid || '', apiKey: '', syncEnabled: true },
-  travelpayouts: { marker: '', apiToken: '', flightsWidgetSrc: '', hotelsWidgetSrc: '', originCities: ['DEL', 'BOM', 'BLR', 'HYD', 'MAA', 'CCU'] },
+  travelpayouts: { marker: config.travelpayouts.marker || '', apiToken: '', flightsWidgetSrc: '', hotelsWidgetSrc: '', originCities: ['DEL', 'BOM', 'BLR', 'HYD', 'MAA', 'CCU'] },
   hiddenCategories: ['Credit Card', 'Finance'],
   hiddenDomains: ['mymuse.in'],
 });

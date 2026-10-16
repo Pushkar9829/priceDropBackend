@@ -26,6 +26,8 @@ const config = {
   travelpayouts: {
     // Data API token (Travelpayouts → Profile → API token); Admin → Affiliate settings overrides
     apiToken: process.env.TRAVELPAYOUTS_TOKEN || '',
+    // Partner id (marker) added to flight booking links; Admin → Affiliate settings overrides
+    marker: process.env.TRAVELPAYOUTS_MARKER === undefined ? '790833' : process.env.TRAVELPAYOUTS_MARKER,
   },
   /** Number of reverse proxies in front of the app (Render/Heroku = 1). */
   trustProxy: parseInt(process.env.TRUST_PROXY, 10) || 0,
