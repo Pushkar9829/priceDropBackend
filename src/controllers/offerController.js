@@ -44,7 +44,15 @@ const travel = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, data);
 });
 
-/** Called after admin changes so the public pages update immediately. */
-const clearCache = () => cache.clear();
+const flights = asyncHandler(async (req, res) => {
+  const data = await require('../services/travelpayoutsService').cheapFlights(str(req.query.origin));
+  return ApiResponse.success(res, data);
+});
 
-module.exports = { list, stores, store, forDomain, siteConfig, travel, clearCache };
+/** Called after admin changes so the public pages update immediately. */
+const clearCache = () => {
+  cache.clear();
+  require('../services/travelpayoutsService').clearCache();
+};
+
+module.exports = { list, stores, store, forDomain, siteConfig, travel, flights, clearCache };

@@ -23,6 +23,10 @@ const config = {
     // Daily refresh of stores + coupons (runs only when the API key is set)
     syncCron: process.env.CUELINKS_SYNC_CRON || '30 3 * * *',
   },
+  travelpayouts: {
+    // Data API token (Travelpayouts → Profile → API token); Admin → Affiliate settings overrides
+    apiToken: process.env.TRAVELPAYOUTS_TOKEN || '',
+  },
   /** Number of reverse proxies in front of the app (Render/Heroku = 1). */
   trustProxy: parseInt(process.env.TRUST_PROXY, 10) || 0,
   rateLimit: {

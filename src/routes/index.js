@@ -37,6 +37,7 @@ router.use('/brands', brandRoutes);
 router.use('/offers', offerRoutes);
 router.get('/site-config', require('../controllers/offerController').siteConfig);
 router.get('/travel', require('../controllers/offerController').travel);
+router.get('/travel/flights', require('../controllers/offerController').flights);
 router.use('/admin', adminRoutes);
 router.use('/internal', internalRoutes);
 

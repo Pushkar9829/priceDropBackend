@@ -14,7 +14,7 @@ const STATUS_KEY = 'affiliate_status';
 const defaults = () => ({
   sections: { offers: true, stores: true, travel: true },
   cuelinks: { cid: config.affiliate.cuelinksCid || '', apiKey: '', syncEnabled: true },
-  travelpayouts: { marker: '', flightsWidgetSrc: '', hotelsWidgetSrc: '' },
+  travelpayouts: { marker: '', apiToken: '', flightsWidgetSrc: '', hotelsWidgetSrc: '', originCities: ['DEL', 'BOM', 'BLR', 'HYD', 'MAA', 'CCU'] },
   hiddenCategories: ['Credit Card', 'Finance'],
   hiddenDomains: ['mymuse.in'],
 });
@@ -59,6 +59,7 @@ const peekAffiliateSettings = () => {
 };
 
 const cuelinksApiKey = (s) => s.cuelinks.apiKey || config.cuelinks.apiKey || '';
+const travelpayoutsToken = (s) => s.travelpayouts.apiToken || config.travelpayouts.apiToken || '';
 
 // ---- validation ----
 const WIDGET_HOSTS = ['tp.media', 'travelpayouts.com', 'tpwgt.com', 'tpwdgt.com', 'tpembd.com', 'tpembars.com', 'tpscr.com'];
@@ -114,6 +115,18 @@ const updateAffiliateSettings = async (patch = {}, userId = null) => {
       if (marker && !/^[A-Za-z0-9_.-]{1,40}$/.test(marker)) throw new AppError('Marker should be your Travelpayouts partner id', 400, 'INVALID_MARKER');
       next.travelpayouts.marker = marker;
     }
+    if (tp.apiToken === null) next.travelpayouts.apiToken = '';
+    else if (typeof tp.apiToken === 'string' && tp.apiToken.trim()) {
+      const token = tp.apiToken.trim();
+      if (!/^[a-f0-9]{32}$/i.test(token)) throw new AppError('Travelpayouts API token is a 32-character code', 400, 'INVALID_TOKEN');
+      next.travelpayouts.apiToken = token;
+    }
+    if (tp.originCities !== undefined) {
+      const codes = cleanList(tp.originCities).map((c) => c.toUpperCase());
+      const bad = codes.filter((c) => !/^[A-Z]{3}$/.test(c));
+      if (bad.length) throw new AppError(`Use 3-letter airport/city codes (e.g. DEL, BOM): ${bad.join(', ')}`, 400, 'INVALID_CITY');
+      next.travelpayouts.originCities = [...new Set(codes)].slice(0, 12);
+    }
     if (tp.flightsWidgetSrc !== undefined) next.travelpayouts.flightsWidgetSrc = cleanWidgetSrc(tp.flightsWidgetSrc);
     if (tp.hotelsWidgetSrc !== undefined) next.travelpayouts.hotelsWidgetSrc = cleanWidgetSrc(tp.hotelsWidgetSrc);
   }
@@ -127,11 +140,19 @@ const updateAffiliateSettings = async (patch = {}, userId = null) => {
   return next;
 };
 
-/** Admin view: never returns the API key itself. */
+/** Admin view: never returns the API key or token themselves. */
 const adminView = (s) => {
   const key = cuelinksApiKey(s);
+  const token = travelpayoutsToken(s);
+  const { apiToken, ...tp } = s.travelpayouts;
   return {
     ...s,
+    travelpayouts: {
+      ...tp,
+      hasApiToken: Boolean(token),
+      apiTokenSource: apiToken ? 'admin' : config.travelpayouts.apiToken ? 'server' : null,
+      apiTokenHint: token ? `••••${token.slice(-4)}` : '',
+    },
     cuelinks: {
       cid: s.cuelinks.cid,
       syncEnabled: s.cuelinks.syncEnabled,
@@ -150,6 +171,8 @@ const publicConfig = (s) => ({
     marker: s.travelpayouts.marker,
     flightsWidgetSrc: s.travelpayouts.flightsWidgetSrc,
     hotelsWidgetSrc: s.travelpayouts.hotelsWidgetSrc,
+    originCities: s.travelpayouts.originCities,
+    fares: Boolean(travelpayoutsToken(s)),
   },
 });
 
@@ -169,6 +192,7 @@ module.exports = {
   peekAffiliateSettings,
   updateAffiliateSettings,
   cuelinksApiKey,
+  travelpayoutsToken,
   adminView,
   publicConfig,
   recordSyncStatus,
