@@ -2,6 +2,7 @@ const AppError = require('../utils/AppError');
 const logger = require('../utils/logger');
 const { PriceAlert, ALERT_STATUS, Product, StoreProduct } = require('../models');
 const notificationService = require('./notificationService');
+const { outboundUrl } = require('../utils/affiliate');
 
 const triggerAlertNotification = async (alert, context) => {
   // Atomic claim — prevents duplicate notifies under concurrent store checks
@@ -233,7 +234,7 @@ const evaluateAlertsForProduct = async (productId, { changedStoreProductId = nul
           currentPrice: price,
           previousPrice: listing && String(listing._id) === String(changedStoreProductId) ? previousPrice : null,
           title: product?.title || listing?.title || 'Product',
-          productUrl: listing?.affiliateUrl || listing?.productUrl || '',
+          productUrl: outboundUrl(listing, 'price_alert'),
           storeName: listing?.storeId?.name || '',
           storeProductId: listing?._id || null,
         });

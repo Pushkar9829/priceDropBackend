@@ -10,6 +10,12 @@ const config = {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   },
   corsOrigin: process.env.CORS_ORIGIN || '*',
+  // Public site address — used in the sitemap and in links sent by email
+  siteUrl: (process.env.SITE_URL || 'https://www.droppingnow.com').replace(/\/+$/, ''),
+  affiliate: {
+    // Cuelinks channel id; outbound store links are wrapped in its tracking redirect
+    cuelinksCid: process.env.CUELINKS_CID === undefined ? '279120' : process.env.CUELINKS_CID,
+  },
   /** Number of reverse proxies in front of the app (Render/Heroku = 1). */
   trustProxy: parseInt(process.env.TRUST_PROXY, 10) || 0,
   rateLimit: {
@@ -26,7 +32,7 @@ const config = {
   /** Adaptive live-price monitoring (see services/monitorScheduler.js). */
   monitor: {
     hotIntervalMin: parseInt(process.env.MONITOR_HOT_INTERVAL_MIN, 10) || 30,
-    normalIntervalMin: parseInt(process.env.MONITOR_NORMAL_INTERVAL_MIN, 10) || 120,
+    normalIntervalMin: parseInt(process.env.MONITOR_NORMAL_INTERVAL_MIN, 10) || 240,
     coldIntervalMin: parseInt(process.env.MONITOR_COLD_INTERVAL_MIN, 10) || 720,
     maxBackoffMin: parseInt(process.env.MONITOR_MAX_BACKOFF_MIN, 10) || 24 * 60,
     batchSize: parseInt(process.env.MONITOR_BATCH_SIZE, 10) || 150,

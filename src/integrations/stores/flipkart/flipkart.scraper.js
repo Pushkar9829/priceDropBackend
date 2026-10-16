@@ -1,11 +1,11 @@
 const config = require('../../../config');
+const { isStoreUrl } = require('../../../utils/storeUrl');
 const { getByExternalId, searchCatalog, buildDemoHtml } = require('../../demo/demoCatalog');
 const { fetchHtml } = require('../base/httpClient');
 const { fetchRenderedHtml } = require('../base/browserClient');
 const FlipkartParser = require('./flipkart.parser');
 
-const isLiveFlipkartUrl = (url = '') =>
-  /^https?:\/\/([^/]+\.)?flipkart\.com\b/i.test(url);
+const isLiveFlipkartUrl = (url = '') => isStoreUrl('flipkart', url);
 
 const isFixtureUrl = (url = '') => {
   try {

@@ -209,10 +209,18 @@ class FlipkartParser extends StoreParser {
 
       const $img = $card.find('img.UCc1lI, img').first();
       const cardText = (sel) => $card.find(sel).first().text().replace(/\s+/g, ' ').trim();
+      // Fashion/grid cards: brand on its own line + the full name in a link's title attribute
+      const gridName = ($card.find('a[title]').first().attr('title') || '').replace(/\s+/g, ' ').trim();
+      const gridBrand = cardText('div.Fo1I0b') || cardText('div.syl9yP');
+      const gridTitle =
+        gridName && gridBrand && !gridName.toLowerCase().startsWith(gridBrand.toLowerCase())
+          ? `${gridBrand} ${gridName}`
+          : gridName;
       const title =
         cardText('div.RG5Slk') ||
         cardText('div.KzDlHZ') ||
         cardText('div._4rR01T') ||
+        gridTitle ||
         $img.attr('alt') ||
         $link.attr('title') ||
         '';

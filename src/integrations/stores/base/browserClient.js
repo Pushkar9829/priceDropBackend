@@ -30,6 +30,8 @@ const getBrowser = async () => {
   if (!browserPromise) {
     try {
       // eslint-disable-next-line import/no-extraneous-dependencies, global-require
+      // On Render the browser is installed inside node_modules (scripts/installBrowsers.js)
+      if (process.env.RENDER && !process.env.PLAYWRIGHT_BROWSERS_PATH) process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
       const { chromium } = require('playwright');
       const launchArgs = [
         '--disable-blink-features=AutomationControlled',

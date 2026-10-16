@@ -13,7 +13,8 @@
     "scrape:flipkart": "node src/integrations/stores/flipkart/scrapeFlipkart.js",
     "scrape:brands": "node src/jobs/scrapeBrandsBatch.js",
     "backfill:monitoring": "node scripts/backfillMonitoring.js",
-    "start:single": "node src/server.js"
+    "start:single": "node src/server.js",
+    "postinstall": "node scripts/installBrowsers.js"
   },
   "keywords": [
     "price-comparison",

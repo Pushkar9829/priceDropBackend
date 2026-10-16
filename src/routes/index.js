@@ -9,6 +9,7 @@ const dealRoutes = require('./dealRoutes');
 const brandRoutes = require('./brandRoutes');
 const adminRoutes = require('./adminRoutes');
 const internalRoutes = require('./internalRoutes');
+const { getSitemap } = require('../controllers/sitemapController');
 
 const router = express.Router();
 
@@ -21,6 +22,9 @@ router.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
   });
 });
+
+// Public XML sitemap (the website proxies /sitemap.xml here)
+router.get('/sitemap.xml', getSitemap);
 
 router.use('/auth', authRoutes);
 router.use('/products', productRoutes);

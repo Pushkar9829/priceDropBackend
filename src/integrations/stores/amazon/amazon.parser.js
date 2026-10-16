@@ -89,10 +89,20 @@ class AmazonParser extends StoreParser {
       if (!asin || asin.length < 10 || seen.has(asin)) return;
       seen.add(asin);
 
-      const title =
-        $card.find('h2 a span').first().text().trim() ||
-        $card.find('h2 span').first().text().trim() ||
-        $card.find('h2').first().text().trim();
+      // Fashion cards split the brand ("Nike") and the product name into two <h2>s —
+      // keep the longest heading and prefix the short brand line when it's missing.
+      const heads = $card
+        .find('h2')
+        .map((_, h) => $(h).text().replace(/\s+/g, ' ').trim())
+        .get()
+        .filter(Boolean);
+      let title = [...heads].sort((a, b) => b.length - a.length)[0] || '';
+      const brandLine = heads.find((h) => h !== title && h.split(' ').length <= 4);
+      if (brandLine && !title.toLowerCase().startsWith(brandLine.toLowerCase())) title = `${brandLine} ${title}`;
+      if (title.split(' ').length <= 2) {
+        const alt = ($card.find('img.s-image').first().attr('alt') || '').replace(/^Sponsored Ad\s*-\s*/i, '').trim();
+        if (alt.length > title.length) title = alt;
+      }
 
       const href = $card.find('h2 a').first().attr('href') || `/dp/${asin}`;
       const productUrl = href.startsWith('http')

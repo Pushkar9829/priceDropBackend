@@ -1,11 +1,11 @@
 const config = require('../../../config');
+const { isStoreUrl } = require('../../../utils/storeUrl');
 const { getByExternalId, searchCatalog, buildDemoHtml } = require('../../demo/demoCatalog');
 const { fetchHtml } = require('../base/httpClient');
 const { fetchRenderedHtml } = require('../base/browserClient');
 const AmazonParser = require('./amazon.parser');
 
-const isLiveAmazonUrl = (url = '') =>
-  /^https?:\/\/([^/]+\.)?amazon\.(in|com|co\.uk|de|fr|co\.jp)\b/i.test(url);
+const isLiveAmazonUrl = (url = '') => isStoreUrl('amazon', url);
 
 const isFixtureUrl = (url = '') => {
   try {

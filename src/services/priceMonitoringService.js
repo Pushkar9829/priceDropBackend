@@ -211,6 +211,10 @@ const runPriceMonitoringInner = async ({ limit = config.monitor.batchSize, store
 
   const startedAt = Date.now();
   stopping = false;
+  // Heartbeat: checks that start near the end of the budget can run several minutes
+  // (timeouts x retries), so keep the lease alive until this run actually finishes.
+  const heartbeat = setInterval(() => lock.renew(2 * 60 * 1000).catch(() => {}), 60 * 1000);
+  heartbeat.unref?.();
   try {
     await expireDeals();
 
@@ -275,6 +279,7 @@ const runPriceMonitoringInner = async ({ limit = config.monitor.batchSize, store
     logger.info('Price monitoring completed', summary);
     return summary;
   } finally {
+    clearInterval(heartbeat);
     lastRun = currentRun ? { ...currentRun, finishedAt: new Date() } : lastRun;
     currentRun = null;
     await lock.release().catch(() => {});

@@ -20,6 +20,7 @@ const { isLiveAmazonUrl } = require('../integrations/stores/amazon/amazon.scrape
 const { isLiveCromaUrl } = require('../integrations/stores/croma/croma.scraper');
 const { closeBrowser } = require('../integrations/stores/base/browserClient');
 const config = require('../config');
+const { detectStoreSlug: detectStoreSlugStrict } = require('../utils/storeUrl');
 const logger = require('../utils/logger');
 const {
   refreshProductSummaries,
@@ -602,6 +603,20 @@ const updateStoreProduct = async (id, updates = {}) => {
 
   if (Object.keys(patch).length === 0) {
     throw new AppError('No valid fields to update', 400, 'EMPTY_UPDATE');
+  }
+
+  // The monitor fetches whatever URL is stored — only real store pages are allowed
+  // (local fixture pages too, outside production, for scraper tests)
+  if (patch.productUrl) {
+    // The edit form always sends the URL back — only a changed URL needs checking
+    const current = await StoreProduct.findById(id).select('productUrl').lean();
+    if (current && current.productUrl === patch.productUrl) delete patch.productUrl;
+  }
+  if (patch.productUrl) {
+    const isFixture = config.env !== 'production' && /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(patch.productUrl);
+    if (!detectStoreSlugStrict(patch.productUrl) && !isFixture) {
+      throw new AppError('Product URL must be an Amazon, Flipkart or Croma product page', 400, 'INVALID_STORE_URL');
+    }
   }
 
   if (patch.productUrl && !patch.externalProductId) {

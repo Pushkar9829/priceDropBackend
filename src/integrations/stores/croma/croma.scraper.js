@@ -1,11 +1,11 @@
 const config = require('../../../config');
+const { isStoreUrl } = require('../../../utils/storeUrl');
 const { getByExternalId, searchCatalog, buildDemoHtml } = require('../../demo/demoCatalog');
 const { fetchHtml } = require('../base/httpClient');
 const { fetchRenderedHtml } = require('../base/browserClient');
 const CromaParser = require('./croma.parser');
 
-const isLiveCromaUrl = (url = '') =>
-  /^https?:\/\/([^/]+\.)?croma\.com\b/i.test(url);
+const isLiveCromaUrl = (url = '') => isStoreUrl('croma', url);
 
 const isFixtureUrl = (url = '') => {
   try {
