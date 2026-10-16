@@ -9,6 +9,7 @@ const dealRoutes = require('./dealRoutes');
 const brandRoutes = require('./brandRoutes');
 const adminRoutes = require('./adminRoutes');
 const internalRoutes = require('./internalRoutes');
+const offerRoutes = require('./offerRoutes');
 const { getSitemap } = require('../controllers/sitemapController');
 
 const router = express.Router();
@@ -33,6 +34,7 @@ router.use('/price-alerts', priceAlertRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/deals', dealRoutes);
 router.use('/brands', brandRoutes);
+router.use('/offers', offerRoutes);
 router.use('/admin', adminRoutes);
 router.use('/internal', internalRoutes);
 

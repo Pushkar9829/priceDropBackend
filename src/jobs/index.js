@@ -40,6 +40,18 @@ const startJobs = () => {
   }
 
   tasks.push(cron.schedule(config.cron.priceMonitor, tick));
+
+  // Daily Cuelinks stores + coupons refresh (only when an API key is configured)
+  if (config.cuelinks.apiKey && cron.validate(config.cuelinks.syncCron)) {
+    tasks.push(
+      cron.schedule(config.cuelinks.syncCron, () =>
+        require('../services/cuelinksService')
+          .syncFromApi()
+          .catch((err) => logger.error('Affiliate sync failed', { error: err.message }))
+      )
+    );
+    logger.info('Affiliate sync scheduled', { cron: config.cuelinks.syncCron });
+  }
   logger.info('Price monitor scheduled', {
     tick: config.cron.priceMonitor,
     intervalsMin: {

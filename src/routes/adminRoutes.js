@@ -37,6 +37,7 @@ router.post('/products/refresh', adminController.refreshPrices);
 router.post('/products/:productId/refresh', v.mongoIdParam('productId'), validate, adminController.refreshPrices);
 
 // Background jobs (keyword scrape, full refresh, batch retry)
+router.post('/affiliate/sync', adminController.syncAffiliate);
 router.get('/jobs', adminController.listJobs);
 router.get('/jobs/:id', adminController.getJob);
 

@@ -16,6 +16,13 @@ const config = {
     // Cuelinks channel id; outbound store links are wrapped in its tracking redirect
     cuelinksCid: process.env.CUELINKS_CID === undefined ? '279120' : process.env.CUELINKS_CID,
   },
+  cuelinks: {
+    // V3 API key (cuelinks.com → Settings → API Keys, scopes read:campaigns + read:offers)
+    apiKey: process.env.CUELINKS_API_KEY || '',
+    baseUrl: process.env.CUELINKS_API_BASE || 'https://developers.cuelinks.com/pub_api/v3',
+    // Daily refresh of stores + coupons (runs only when the API key is set)
+    syncCron: process.env.CUELINKS_SYNC_CRON || '30 3 * * *',
+  },
   /** Number of reverse proxies in front of the app (Render/Heroku = 1). */
   trustProxy: parseInt(process.env.TRUST_PROXY, 10) || 0,
   rateLimit: {

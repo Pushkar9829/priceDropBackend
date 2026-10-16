@@ -94,6 +94,17 @@ const refreshPrices = asyncHandler(async (req, res) => {
   return accepted(res, job, 'Full price refresh started');
 });
 
+/** Pull the latest Cuelinks stores + coupons now (needs CUELINKS_API_KEY). */
+const syncAffiliate = asyncHandler(async (req, res) => {
+  if (await jobRegistry.hasRunning('affiliate-sync')) {
+    throw new AppError('An affiliate sync is already running', 409, 'JOB_RUNNING');
+  }
+  const job = await jobRegistry.startJob('affiliate-sync', 'Sync Cuelinks stores and offers', () =>
+    require('../services/cuelinksService').syncFromApi()
+  );
+  return accepted(res, job, 'Affiliate sync started');
+});
+
 /** Run one scheduler tick now (only due listings) — same as the cron, but on demand. */
 const runMonitorTick = asyncHandler(async (req, res) => {
   if (await jobRegistry.hasRunning('monitor-tick') || await jobRegistry.hasRunning('refresh-all')) {
@@ -171,6 +182,7 @@ const updateDeal = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+  syncAffiliate,
   dashboard,
   listUsers,
   updateUser,

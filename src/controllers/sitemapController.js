@@ -1,5 +1,5 @@
 const config = require('../config');
-const { Product } = require('../models');
+const { Product, AffiliateCampaign } = require('../models');
 const { createTtlCache } = require('../utils/ttlCache');
 
 // The sitemap is the same for every visitor and changes slowly — build it at most hourly
@@ -9,6 +9,8 @@ const MAX_URLS = 45_000; // sitemaps.org limit is 50,000 per file
 const STATIC_PATHS = [
   ['/', 'daily', '1.0'],
   ['/deals', 'hourly', '0.9'],
+  ['/offers', 'daily', '0.8'],
+  ['/stores', 'weekly', '0.6'],
   ['/search', 'daily', '0.7'],
   ['/about', 'monthly', '0.3'],
   ['/privacy', 'yearly', '0.2'],
@@ -34,6 +36,10 @@ const buildSitemap = async () => {
   ]);
   for (const c of categories) urls.push(urlTag(`${site}/search?category=${encodeURIComponent(c)}`, { changefreq: 'daily', priority: '0.6' }));
   for (const b of brands) urls.push(urlTag(`${site}/brands/${encodeURIComponent(b)}`, { changefreq: 'daily', priority: '0.5' }));
+
+  // Partner store pages (empty until the affiliate catalogue has been imported)
+  const stores = await AffiliateCampaign.find({ usable: true, offerCount: { $gt: 0 } }, { slug: 1 }).lean().catch(() => []);
+  for (const s of stores) urls.push(urlTag(`${site}/stores/${s.slug}`, { changefreq: 'daily', priority: '0.5' }));
 
   const products = await Product.find({ isActive: true }, { _id: 1, updatedAt: 1 })
     .sort({ updatedAt: -1 })
