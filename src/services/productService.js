@@ -278,7 +278,8 @@ const upsertStoreProduct = async (productId, storeResult) => {
 
 /**
  * Search catalog in MongoDB. Live store scrape is opt-in via live=true (admin only, slow).
- * sort: relevance (default) | price_asc | price_desc | newest
+ * sort: relevance (default) | price_asc | price_desc | newest | discount
+ * minDiscount: only products at least this many % below MRP
  */
 const searchProducts = async ({
   q,
@@ -290,6 +291,7 @@ const searchProducts = async ({
   brand,
   minPrice,
   maxPrice,
+  minDiscount,
 } = {}) => {
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
   const pageSize = Math.min(48, Math.max(1, parseInt(limit, 10) || 20));
@@ -331,6 +333,8 @@ const searchProducts = async ({
       ...(max > 0 ? { $lte: max } : {}),
     };
   }
+  const minOff = Math.min(95, Math.max(0, parseInt(minDiscount, 10) || 0));
+  if (minOff > 0) filter['priceSummary.discountPercent'] = { $gte: minOff };
   // Category counts for the sidebar reflect the current query/brand/price — not the whole catalog
   // Facets (category counts) are computed after the results, from whichever predicate
   // actually produced them, minus the category filter itself
@@ -341,12 +345,14 @@ const searchProducts = async ({
   let items;
   let total;
 
-  if (sort === 'price_asc' || sort === 'price_desc') {
+  if (sort === 'price_asc' || sort === 'price_desc' || sort === 'discount') {
     // Index-backed sorts on the denormalized summary (no $lookup)
     const order =
       sort === 'price_asc'
         ? { 'priceSummary.sortPrice': 1, _id: 1 }
-        : { 'priceSummary.lowestPrice': -1, _id: 1 };
+        : sort === 'discount'
+          ? { 'priceSummary.discountPercent': -1, 'priceSummary.sortPrice': 1, _id: 1 }
+          : { 'priceSummary.lowestPrice': -1, _id: 1 };
     [items, total] = await Promise.all([
       Product.find(filter).sort(order).skip(skip).limit(pageSize).lean(),
       Product.countDocuments(filter),
@@ -358,6 +364,7 @@ const searchProducts = async ({
         if (filter.category) textFilter.category = filter.category;
         if (filter.brand) textFilter.brand = filter.brand;
         if (filter['priceSummary.lowestPrice']) textFilter['priceSummary.lowestPrice'] = filter['priceSummary.lowestPrice'];
+        if (filter['priceSummary.discountPercent']) textFilter['priceSummary.discountPercent'] = filter['priceSummary.discountPercent'];
         total = await Product.countDocuments(textFilter);
         if (total > 0) {
           const { category: _omit, ...textNoCategory } = textFilter;

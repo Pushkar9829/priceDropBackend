@@ -27,7 +27,7 @@ const changePasswordRules = [
     .withMessage('New password must be 8–128 characters'),
 ];
 
-const SEARCH_SORTS = ['relevance', 'price_asc', 'price_desc', 'newest'];
+const SEARCH_SORTS = ['relevance', 'price_asc', 'price_desc', 'newest', 'discount'];
 
 const searchRules = [
   query('q').optional().isString().withMessage('q must be text').trim().isLength({ max: 200 }),
@@ -38,6 +38,7 @@ const searchRules = [
   query('brand').optional().isString().withMessage('brand must be text').trim().isLength({ max: 100 }),
   query('minPrice').optional({ checkFalsy: true }).isFloat({ min: 0 }).withMessage('minPrice must be a positive number'),
   query('maxPrice').optional({ checkFalsy: true }).isFloat({ min: 0 }).withMessage('maxPrice must be a positive number'),
+  query('minDiscount').optional({ checkFalsy: true }).isInt({ min: 1, max: 95 }).withMessage('minDiscount must be 1–95'),
 ];
 
 const priceHistoryQueryRules = [

@@ -10,7 +10,7 @@ const similarCache = createTtlCache({ ttlMs: 120_000, max: 2000 });
 const asyncHandler = require('../utils/asyncHandler');
 
 const search = asyncHandler(async (req, res) => {
-  const { q, page = 1, limit = 20, live, sort, category, brand, minPrice, maxPrice } = req.query;
+  const { q, page = 1, limit = 20, live, sort, category, brand, minPrice, maxPrice, minDiscount } = req.query;
   const params = {
     q,
     page: parseInt(page, 10),
@@ -21,6 +21,7 @@ const search = asyncHandler(async (req, res) => {
     brand,
     minPrice,
     maxPrice,
+    minDiscount,
   };
   // Live (admin) searches scrape stores and must never be served from cache
   const data = params.live
