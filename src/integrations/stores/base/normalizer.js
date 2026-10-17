@@ -72,9 +72,20 @@ const calcDiscount = (mrp, price) => {
 /**
  * Convert store-specific raw fields into the common internal shape.
  */
+/**
+ * A list price is only believable between the selling price and 10x it. Anything else is a
+ * mis-read (unit price "₹2,09,900 per g", an add-on's price, a seller's fantasy MRP) and
+ * would show up as a fake "99% off".
+ */
+const plausibleMrp = (mrp, price) => {
+  if (!mrp) return null;
+  if (!price) return mrp;
+  return mrp >= price && mrp <= price * 10 ? mrp : null;
+};
+
 const toNormalizedProduct = (raw = {}) => {
   const currentPrice = parsePrice(raw.currentPrice ?? raw.price);
-  const mrp = parsePrice(raw.mrp);
+  const mrp = plausibleMrp(parsePrice(raw.mrp), currentPrice);
   const currency = normalizeCurrency(raw.currency);
   const availability = normalizeAvailability(raw.availability);
   const title = normalizeTitle(raw.title || '');
@@ -117,5 +128,6 @@ module.exports = {
   normalizeAvailability,
   normalizeTitle,
   calcDiscount,
+  plausibleMrp,
   toNormalizedProduct,
 };

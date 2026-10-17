@@ -59,20 +59,70 @@ class FlipkartParser extends StoreParser {
       }
     }
 
-    const stateMatch = html.match(
-      /window\.__INITIAL_STATE__\s*=\s*(\{[\s\S]*?\});?\s*<\/script>/
-    );
-    if (stateMatch?.[1] && out.currentPrice == null) {
-      try {
-        const flat = stateMatch[1];
-        const priceHit = flat.match(/"finalPrice"\s*:\s*\{[^}]*"value"\s*:\s*(\d+)/);
-        if (priceHit) out.currentPrice = Number(priceHit[1]);
-      } catch {
-        // ignore
+    // Note: window.__INITIAL_STATE__ "finalPrice" values belong to add-ons (extended warranty,
+    // screen protection — "digitalType":"EW"), not the product: a ₹15,000 phone read as ₹152.
+    return out;
+  }
+
+  /**
+   * The price block shoppers see under the title, read from the page's text in order:
+   *
+   *   title · "4.3" · "| 83,153" · [badge] · "25%" · "41,300" · "₹30,999" · "Buy at ₹25,706"
+   *
+   * (discount %, MRP without ₹, selling price). Phone pages without that block show it on
+   * the selected variant chip instead: "Variant:" · "128 GB + 4 GB" · … · "128 GB + 4 GB" ·
+   * "↓31%" · "25,999" · "₹17,999". Class names are obfuscated and change, the order doesn't.
+   */
+  mainPriceBlock($) {
+    const tokens = [];
+    const walk = (node) => {
+      for (const ch of node.children || []) {
+        if (ch.type === 'text') {
+          const t = ch.data.replace(/\s+/g, ' ').trim();
+          if (t) tokens.push(t);
+        } else if (ch.type === 'tag' && !['script', 'style', 'noscript'].includes(ch.name)) {
+          walk(ch);
+        }
+      }
+    };
+    const body = $('body')[0];
+    if (!body) return {};
+    walk(body);
+
+    const STOP = /^(Delivery details|Delivery by|Product highlights|Similar Products|Bank offers|Specifications|See other sellers|Seller:)/;
+    const RUPEES = /^₹\s?[\d,]+$/;
+    const AMOUNT = /^[\d,]+$/;
+    const PCT = /^↓?\d{1,2}%( off)?$/i;
+    const OOS = /^(Sold Out|Out of stock|Currently unavailable|Coming soon)/i;
+    const readAround = (i) => {
+      const price = parsePrice(tokens[i]);
+      const mrp = i >= 2 && AMOUNT.test(tokens[i - 1]) && PCT.test(tokens[i - 2]) ? parsePrice(tokens[i - 1]) : null;
+      return { price, mrp };
+    };
+
+    // 1. The block after the rating ("| 83,153"), up to delivery/seller info
+    const start = tokens.findIndex((t) => /^Sale ends in/.test(t));
+    const rating = tokens.findIndex((t, i) => i > start && /^\|\s?[\d,.]+[KkL+]*$/.test(t));
+    if (rating > -1) {
+      for (let i = rating + 1; i < Math.min(tokens.length, rating + 12) && !STOP.test(tokens[i]); i += 1) {
+        if (OOS.test(tokens[i])) return { outOfStock: true };
+        if (RUPEES.test(tokens[i])) return readAround(i);
       }
     }
 
-    return out;
+    // 2. The selected variant's chip
+    const v = tokens.findIndex((t, i) => i > start && t === 'Variant:');
+    if (v > -1 && tokens[v + 1]) {
+      const label = tokens[v + 1];
+      const chip = tokens.indexOf(label, v + 2);
+      if (chip > -1) {
+        for (let i = chip + 1; i < Math.min(tokens.length, chip + 5); i += 1) {
+          if (OOS.test(tokens[i])) return { outOfStock: true };
+          if (RUPEES.test(tokens[i])) return readAround(i);
+        }
+      }
+    }
+    return {};
   }
 
   parseProductPage(html, url = '') {
@@ -89,7 +139,13 @@ class FlipkartParser extends StoreParser {
       this.text($, 'h1.product-title') ||
       this.text($, 'h1');
 
+    const main = this.mainPriceBlock($);
+    // No seller right now: the page offers "Notify Me" instead of a cart/buy button
+    // (as rendered text, or as the button label in the server-rendered state JSON)
+    const button = (label) => new RegExp(`(>\\s*|"text":")(${label})\\s*("|<)`, 'i').test(html);
+    if (button('Notify Me') && !button('Add to cart|Buy now')) main.outOfStock = true;
     const currentPrice =
+      main.price ??
       fromScripts.currentPrice ??
       this.priceFromSelectors($, [
         'div.Nx9bqj',
@@ -102,12 +158,9 @@ class FlipkartParser extends StoreParser {
         '.price',
       ]);
 
-    const mrp = this.priceFromSelectors($, [
-      'div.yRaY8j',
-      'div._3I9_wc',
-      'div.kRYCnD',
-      'div.yRaY8j.A6+E6v',
-    ]);
+    const mrp =
+      (main.price ? main.mrp : null) ??
+      this.priceFromSelectors($, ['div.yRaY8j', 'div._3I9_wc', 'div.kRYCnD', 'div.yRaY8j.A6+E6v']);
 
     const ratingText =
       this.text($, 'div.XQDdHH') ||
@@ -162,6 +215,9 @@ class FlipkartParser extends StoreParser {
       'Flipkart';
 
     if (!title) {
+      if (/page you are looking for has been moved or deleted/i.test($.root().text().replace(/\s+/g, ' '))) {
+        throw new CollectionError('Flipkart: product page removed', FETCH_ERRORS.PRODUCT_NOT_FOUND);
+      }
       const snippet = $.text().slice(0, 2000);
       const blocked = /detect|captcha|access denied|something went wrong/i.test(snippet);
       throw new CollectionError(
@@ -176,7 +232,7 @@ class FlipkartParser extends StoreParser {
       title,
       currentPrice,
       mrp,
-      availability: this.availabilityFromText(availabilityText || 'IN_STOCK'),
+      availability: main.outOfStock ? 'OUT_OF_STOCK' : this.availabilityFromText(availabilityText || 'IN_STOCK'),
       brand,
       images,
       seller,

@@ -76,9 +76,10 @@ const refreshProductSummaries = async (productIds) => {
           lowestPrice: r.lowestPrice ?? null,
           sortPrice: r.lowestPrice ?? NO_PRICE_SORT,
           highestPrice: r.highestPrice ?? null,
-          mrp: r.mrp ?? null,
+          // An MRP over 10x the price is a mis-read, not a 90%+ discount
+          mrp: r.mrp && !(r.lowestPrice && r.mrp > r.lowestPrice * 10) ? r.mrp : null,
           discountPercent:
-            r.lowestPrice && r.mrp && r.mrp > r.lowestPrice
+            r.lowestPrice && r.mrp && r.mrp > r.lowestPrice && r.mrp <= r.lowestPrice * 10
               ? Math.round(((r.mrp - r.lowestPrice) / r.mrp) * 100)
               : null,
           storeCount: r.storeCount,

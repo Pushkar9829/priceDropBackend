@@ -5,7 +5,67 @@ const { CollectionError, FETCH_ERRORS } = require('../base/store.types');
 /**
  * Amazon HTML parser (Cheerio) — fixtures + live amazon.in.
  */
+// Price blocks of the main buy box, most specific first (other .a-price nodes on the page
+// belong to EMI plans, other sellers, accessories and recommendations)
+const CORE_PRICE_BOXES = [
+  '#corePriceDisplay_desktop_feature_div',
+  '#corePrice_feature_div',
+  '#corePrice_desktop',
+  '#apex_desktop',
+  '#apex_offerDisplay_desktop',
+];
+// Unit prices ("₹2,09,900.00 per g") live next to the real price — never a price or an MRP
+const UNIT_PRICE = '.pricePerUnit, [id*="pricePerUnit"], [id*="PricePerUnit"], [id*="TaxInclusiveMessage"]';
+
+/**
+ * Some amazon.in nodes print amounts without the decimal point ("₹18,49900" is ₹18,499.00),
+ * mixed with normal ones on the same page. amazon.in always groups thousands with commas,
+ * so 5 digits after the last comma — or 4+ digits with no comma at all — means paise glued on.
+ */
+const moneyText = (raw) => {
+  let s = String(raw || '').replace(/\s+/g, '');
+  const digits = s.replace(/^₹/, '');
+  if (/^\d{1,3}(,\d{2,3})*,\d{5}$/.test(digits) || /^\d{4,}$/.test(digits)) s = s.slice(0, -2);
+  return parsePrice(s);
+};
+
 class AmazonParser extends StoreParser {
+  /** Selling price from the buy box: the whole-rupee part when present, else the a11y text. */
+  corePrice($, html) {
+    for (const box of CORE_PRICE_BOXES) {
+      const nodes = $(`${box} .a-price`).toArray();
+      for (const node of nodes) {
+        const $p = $(node);
+        // Struck-through list prices and unit prices are not the selling price
+        if ($p.hasClass('a-text-price') || $p.attr('data-a-strike') === 'true' || $p.closest(UNIT_PRICE).length) continue;
+        const whole = parsePrice($p.find('.a-price-whole').first().text());
+        const price = whole || moneyText($p.find('.a-offscreen').first().text());
+        if (price) return price;
+      }
+    }
+    return null;
+  }
+
+  /** M.R.P. / list price shown struck-through in the buy box (never a per-unit price). */
+  listPrice($, html) {
+    const selectors = [
+      ...CORE_PRICE_BOXES.map((b) => `${b} .basisPrice .a-offscreen`),
+      ...CORE_PRICE_BOXES.map((b) => `${b} .a-text-price .a-offscreen`),
+      '#listPrice',
+      '.basisPrice .a-offscreen',
+    ];
+    for (const selector of selectors) {
+      for (const node of $(selector).toArray()) {
+        const $n = $(node);
+        if ($n.closest(UNIT_PRICE).length || /\bper\s/i.test($n.parent().parent().text())) continue;
+        const value = moneyText($n.text() || $n.attr('content'));
+        if (value) return value;
+      }
+    }
+    return null;
+  }
+
+
   extractAsinFromUrl(url = '') {
     try {
       const u = new URL(url);
@@ -28,21 +88,11 @@ class AmazonParser extends StoreParser {
       this.text($, 'h1 span') ||
       this.text($, 'h1');
 
-    const price = this.priceFromSelectors($, [
-      '#priceblock_ourprice',
-      '#priceblock_dealprice',
-      '#corePrice_feature_div .a-price .a-offscreen',
-      '#corePriceDisplay_desktop_feature_div .a-price .a-offscreen',
-      '.a-price .a-offscreen',
-      '.a-price-whole',
-      '.price',
-    ]);
+    const price =
+      this.corePrice($, html) ??
+      this.priceFromSelectors($, ['#priceblock_ourprice', '#priceblock_dealprice', '.a-price-whole', '.price']);
 
-    const mrp = this.priceFromSelectors($, [
-      '.a-text-price .a-offscreen',
-      '#listPrice',
-      '.basisPrice .a-offscreen',
-    ]);
+    const mrp = this.listPrice($, html);
 
     const availabilityText =
       this.text($, '#availability') ||
@@ -61,6 +111,9 @@ class AmazonParser extends StoreParser {
       '';
 
     if (!title) {
+      if (/Looking for something\?|couldn.t find that page|Page Not Found/i.test($('title').text() + $('body').text().slice(0, 3000))) {
+        throw new CollectionError('Amazon: product page removed', FETCH_ERRORS.PRODUCT_NOT_FOUND);
+      }
       throw new CollectionError('Amazon parser: title missing', FETCH_ERRORS.PARSE_FAILURE);
     }
 

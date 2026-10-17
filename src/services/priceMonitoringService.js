@@ -5,6 +5,7 @@ const { withStoreProductLock } = require('../utils/monitoringLock');
 const distributedLock = require('../utils/distributedLock');
 const { StoreProduct, Deal, SCRAPE_STATUS } = require('../models');
 const { isValidPrice } = require('../integrations/stores/base/validator');
+const { plausibleMrp } = require('../integrations/stores/base/normalizer');
 const storeIntegrationService = require('./storeIntegrationService');
 const { computeNextCheckAt, resolveTiers } = require('./monitorScheduler');
 const { activeStoreIds, refreshProductSummaries } = require('./productSummaryService');
@@ -124,20 +125,39 @@ const checkStoreProductUnlocked = async (storeProductId, { tier } = {}) => {
   }
 
   const newPrice = fetched.price;
+  const freshMrp = plausibleMrp(isValidPrice(fetched.mrp) ? fetched.mrp : null, newPrice);
+
+  // PRICE SAFETY: a jump to under a quarter / over 4x the last price is far more often a
+  // mis-read (an add-on's price, a unit price) than a real change. Unless the page's own MRP
+  // backs it up, it must be seen on two checks in a row before it replaces the stored price.
+  const swing = previousPrice > 0 && (newPrice < previousPrice * 0.25 || newPrice > previousPrice * 4);
+  const backedByMrp = freshMrp != null && newPrice >= freshMrp * 0.1;
+  if (swing && !backedByMrp && storeProduct.suspectPrice !== newPrice) {
+    storeProduct.suspectPrice = newPrice;
+    await markFetchFailure(
+      storeProduct,
+      new Error(`Unconfirmed price swing ${previousPrice} -> ${newPrice}; re-checking`),
+      SCRAPE_STATUS.TEMPORARILY_UNAVAILABLE,
+      resolvedTier
+    );
+    // Confirm soon rather than after the failure back-off
+    await StoreProduct.updateOne({ _id: storeProduct._id }, { $set: { nextCheckAt: new Date(Date.now() + 15 * 60 * 1000) } }, { timestamps: false });
+    return { failed: true, error: 'unconfirmed_swing', storeProductId: storeProduct._id };
+  }
+  storeProduct.suspectPrice = null;
   markFetchSuccess(storeProduct, resolvedTier, now);
   if (newAvailability === 'OUT_OF_STOCK') storeProduct.scrapeStatus = SCRAPE_STATUS.OUT_OF_STOCK;
 
   const priceChanged = previousPrice !== newPrice;
   const availabilityChanged = previousAvailability !== newAvailability;
 
-  if (isValidPrice(fetched.mrp)) storeProduct.mrp = fetched.mrp;
+  // A stored MRP that no longer fits the price (old mis-read) is dropped, not kept
+  storeProduct.mrp = freshMrp ?? plausibleMrp(storeProduct.mrp, newPrice);
   if (priceChanged) {
     storeProduct.previousPrice = previousPrice;
     storeProduct.currentPrice = newPrice;
   }
-  if (storeProduct.mrp) {
-    storeProduct.discount = storeProduct.mrp > newPrice ? Math.round(((storeProduct.mrp - newPrice) / storeProduct.mrp) * 100) : 0;
-  }
+  storeProduct.discount = storeProduct.mrp > newPrice ? Math.round(((storeProduct.mrp - newPrice) / storeProduct.mrp) * 100) : 0;
   if (availabilityChanged) storeProduct.availability = newAvailability;
   await storeProduct.save();
 
